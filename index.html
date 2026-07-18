@@ -1,0 +1,755 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orthanc — Operator Console</title>
+<style>
+  :root {
+    /* dark-first technical palette; light kept as an accessible fallback */
+    --bg: #0b0e13; --panel: #12171f; --elev: #161d27; --line: #232c38;
+    --ink: #e6ecf3; --muted: #93a1b1; --faint: #66748a;
+    --accent: #3fb287; --accent-ink: #7fe4bf;      /* recon / ok */
+    --danger: #f0574f; --danger-ink: #ff8a84;      /* armed / active TX */
+    --warn: #e0a44f;                                /* caution / open nets */
+    --capture: #ffd166;                             /* hash / the prize */
+    --tx: #7aa2ff;                                  /* outbound commands */
+    --sta: #58b0ff; --eapol: #c792ea;
+    --bar-bg: #1c2531; --scrim: rgba(4,7,11,.62);
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --r: 10px; --r-sm: 7px;
+    --sh-1: 0 1px 2px rgba(0,0,0,.4);
+    --sh-2: 0 6px 20px rgba(0,0,0,.45);
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #eef1f5; --panel: #ffffff; --elev: #f6f8fa; --line: #d9dfe6;
+      --ink: #12181f; --muted: #55616e; --faint: #8592a0;
+      --accent: #1f7a5c; --accent-ink: #0b4c38;
+      --danger: #c23a34; --danger-ink: #922a25; --warn: #a5641b;
+      --capture: #9a6b00; --tx: #2f5fd0; --sta: #1f6bb8; --eapol: #7a3fb0;
+      --bar-bg: #e7ebef; --scrim: rgba(20,24,31,.45);
+      --sh-2: 0 6px 20px rgba(20,30,50,.14);
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; font-family: var(--sans); background: var(--bg); color: var(--ink);
+    font-size: 16px; line-height: 1.5; -webkit-font-smoothing: antialiased;
+  }
+  .visually-hidden {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  }
+
+  /* ---- header ---- */
+  header {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    padding: 12px 18px; border-bottom: 1px solid var(--line); background: var(--panel);
+    position: sticky; top: 0; z-index: 40;
+  }
+  .brand { display: flex; align-items: baseline; gap: 9px; }
+  .brand h1 { font-size: 17px; margin: 0; letter-spacing: 0.18em; font-weight: 700; }
+  .brand .sub { color: var(--muted); font-size: 12px; }
+  .spacer { flex: 1; }
+  .status { display: flex; align-items: center; gap: 7px; font-size: 13px; font-family: var(--mono); color: var(--muted); }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--faint); flex: none; }
+  .dot.up { background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
+  .dot.down { background: var(--danger); }
+
+  /* ---- buttons ---- */
+  button {
+    font: inherit; font-weight: 600; font-size: 14px; color: #fff; background: var(--accent);
+    border: 0; border-radius: var(--r-sm); padding: 9px 14px; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 8px; min-height: 40px;
+    transition: filter .15s ease, background-color .15s ease, opacity .15s ease, border-color .15s ease;
+  }
+  button:hover:not(:disabled) { filter: brightness(1.08); }
+  button:active:not(:disabled) { filter: brightness(.95); }
+  button:focus-visible { outline: 3px solid color-mix(in srgb, var(--tx) 70%, transparent); outline-offset: 2px; }
+  button:disabled { opacity: .42; cursor: not-allowed; }
+  button.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+  button.ghost:hover:not(:disabled) { background: var(--elev); filter: none; }
+  button.danger { background: var(--danger); }
+  button.danger-outline { background: transparent; color: var(--danger-ink); border: 1px solid color-mix(in srgb, var(--danger) 55%, var(--line)); }
+  button.danger-outline:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 12%, transparent); filter: none; }
+  .icon { width: 17px; height: 17px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* ---- layout ---- */
+  main { max-width: 1160px; margin: 0 auto; padding: 18px; display: grid; gap: 16px; }
+  .cols { display: grid; grid-template-columns: 1.5fr 1fr; gap: 16px; align-items: start; }
+  @media (max-width: 860px) { .cols { grid-template-columns: 1fr; } }
+  .stack { display: grid; gap: 16px; align-content: start; }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); padding: 13px 14px; box-shadow: var(--sh-1); }
+  .card .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .card .value { font-family: var(--mono); font-size: 26px; font-weight: 700; margin-top: 3px; font-variant-numeric: tabular-nums; }
+  .card .value.warn { color: var(--warn); }
+  .card .value.capture { color: var(--capture); }
+
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; box-shadow: var(--sh-1); }
+  .panel > h2 {
+    font-size: 12px; margin: 0; padding: 11px 15px; border-bottom: 1px solid var(--line);
+    color: var(--muted); text-transform: uppercase; letter-spacing: 0.07em;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .panel > h2 .icon { width: 15px; height: 15px; color: var(--faint); }
+  .panel-body { padding: 14px 15px; }
+
+  /* ---- armed banner ---- */
+  .arm-banner {
+    display: flex; align-items: center; gap: 11px; padding: 10px 18px;
+    font-size: 13px; font-weight: 600; border-bottom: 1px solid var(--line);
+    background: color-mix(in srgb, var(--accent) 10%, var(--panel)); color: var(--accent-ink);
+  }
+  .arm-banner .icon { width: 18px; height: 18px; }
+  .arm-banner.armed {
+    background: color-mix(in srgb, var(--danger) 15%, var(--panel)); color: var(--danger-ink);
+    border-bottom-color: color-mix(in srgb, var(--danger) 45%, var(--line));
+  }
+  .arm-banner .pulse { width: 9px; height: 9px; border-radius: 50%; background: currentColor; flex: none; }
+  .arm-banner.armed .pulse { animation: pulse 1.5s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
+
+  /* ---- AP table ---- */
+  table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 13px; }
+  th, td { text-align: left; padding: 8px 15px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 600; font-size: 10px; text-transform: uppercase; letter-spacing: .05em; }
+  tbody tr { cursor: pointer; transition: background-color .12s ease; }
+  tbody tr:hover { background: var(--elev); }
+  tbody tr:focus-visible { outline: 2px solid var(--tx); outline-offset: -2px; }
+  tbody tr[aria-selected="true"] { background: color-mix(in srgb, var(--tx) 16%, transparent); }
+  tbody tr[aria-selected="true"] td:first-child { box-shadow: inset 3px 0 0 var(--tx); }
+  td.num { font-variant-numeric: tabular-nums; }
+  .rssi-bar { height: 7px; width: 96px; border-radius: 4px; background: var(--bar-bg); overflow: hidden; }
+  .rssi-bar > i { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
+  .tag { font-size: 10px; padding: 1px 6px; border-radius: 5px; border: 1px solid var(--line); color: var(--muted); font-family: var(--mono); }
+  .tag.open { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); }
+  .tgt-flag { color: var(--tx); font-weight: 700; }
+
+  /* ---- target panel ---- */
+  .target-box { font-family: var(--mono); font-size: 13px; display: grid; gap: 5px; }
+  .target-box .kv { display: flex; justify-content: space-between; gap: 12px; }
+  .target-box .kv .k { color: var(--muted); }
+  .target-box .kv .v { color: var(--ink); text-align: right; overflow: hidden; text-overflow: ellipsis; }
+  .client-list { display: flex; flex-wrap: wrap; gap: 5px; }
+  .client-list:not(:empty) { margin-top: 3px; }
+  .client-chip {
+    font-family: var(--mono); font-size: 11px; line-height: 1.4;
+    padding: 2px 7px; border-radius: var(--r-sm);
+    background: var(--elev); border: 1px solid var(--line); color: var(--sta);
+  }
+
+  /* ---- attack grid ---- */
+  .mode-row { display: flex; gap: 8px; margin-bottom: 12px; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .grid-2 button { justify-content: flex-start; width: 100%; }
+  .hint { font-size: 12px; color: var(--muted); margin: 10px 0 0; display: flex; gap: 7px; align-items: flex-start; }
+  .hint .icon { width: 14px; height: 14px; color: var(--warn); margin-top: 1px; }
+  .field { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .field label { font-size: 12px; color: var(--muted); }
+  .field input[type=number] {
+    width: 68px; font-family: var(--mono); font-size: 13px; padding: 6px 8px; min-height: 34px;
+    background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 6px;
+  }
+  .field input:focus-visible { outline: 2px solid var(--tx); outline-offset: 1px; }
+
+  /* ---- console ---- */
+  .console { border-color: color-mix(in srgb, var(--tx) 20%, var(--line)); }
+  .console-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 9px 12px; border-bottom: 1px solid var(--line); background: var(--elev); }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+  .seg button { background: transparent; color: var(--muted); border: 0; border-radius: 0; padding: 6px 11px; min-height: 34px; font-size: 12px; }
+  .seg button[aria-pressed="true"] { background: var(--panel); color: var(--ink); }
+  .console-tools .mini { padding: 6px 10px; min-height: 34px; font-size: 12px; }
+  #log {
+    font-family: var(--mono); font-size: 12px; line-height: 1.55; margin: 0;
+    height: 300px; overflow-y: auto; overflow-x: hidden; padding: 10px 14px;
+    background: #090c11; scroll-behavior: smooth; overscroll-behavior: contain;
+  }
+  @media (prefers-color-scheme: light) { #log { background: #0d1117; color: #e6ecf3; } }
+  .ln { display: flex; gap: 9px; padding: 1px 0; white-space: pre-wrap; word-break: break-word; }
+  .ln .t0 { color: var(--faint); flex: none; font-variant-numeric: tabular-nums; }
+  .ln .tag2 { flex: none; width: 52px; color: var(--faint); text-transform: uppercase; }
+  .ln .msg { color: var(--muted); }
+  .ln.new { animation: fadein .18s ease-out; }
+  @keyframes fadein { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: none; } }
+  .ln.tx .tag2 { color: var(--tx); } .ln.tx .msg { color: var(--tx); }
+  .ln.atk .tag2, .ln.atk .msg { color: var(--warn); }
+  .ln.hash { background: color-mix(in srgb, var(--capture) 12%, transparent); border-radius: 5px; padding: 3px 6px; margin: 2px -6px; }
+  .ln.hash .tag2, .ln.hash .msg { color: var(--capture); font-weight: 600; }
+  .ln.hash.flash { animation: flash 1s ease-out; }
+  @keyframes flash { 0% { background: color-mix(in srgb, var(--capture) 45%, transparent); } 100% { background: color-mix(in srgb, var(--capture) 12%, transparent); } }
+  .ln.ackok .tag2, .ln.ackok .msg { color: var(--accent-ink); }
+  .ln.ackno .tag2, .ln.ackno .msg { color: var(--danger-ink); }
+  .ln.sta .tag2, .ln.sta .msg { color: var(--sta); }
+  .ln.eapol .tag2, .ln.eapol .msg { color: var(--eapol); }
+  .ln.hello .tag2, .ln.hello .msg { color: var(--accent-ink); }
+  .ln.err .tag2, .ln.err .msg { color: var(--danger-ink); }
+
+  .empty { padding: 26px 15px; text-align: center; color: var(--muted); font-size: 14px; }
+  .note { font-size: 12px; color: var(--muted); margin: 0; }
+
+  /* connect-driven reveal of the console */
+  .reveal { transition: opacity .25s ease, transform .25s ease; }
+  .reveal.hidden-pre { opacity: 0; transform: translateY(8px); pointer-events: none; }
+
+  /* ---- modal ---- */
+  .scrim {
+    position: fixed; inset: 0; background: var(--scrim); z-index: 100;
+    display: flex; align-items: center; justify-content: center; padding: 18px;
+  }
+  .scrim[hidden] { display: none; }
+  .modal {
+    background: var(--panel); border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--line));
+    border-radius: 12px; max-width: 460px; width: 100%; box-shadow: var(--sh-2);
+    animation: rise .2s ease-out;
+  }
+  @keyframes rise { from { opacity: 0; transform: translateY(10px) scale(.98); } to { opacity: 1; transform: none; } }
+  .modal h3 { margin: 0; padding: 16px 18px 0; font-size: 16px; display: flex; align-items: center; gap: 9px; }
+  .modal h3 .icon { color: var(--danger); width: 20px; height: 20px; }
+  .modal .body { padding: 12px 18px; font-size: 13.5px; color: var(--muted); }
+  .modal .warn-box {
+    font-family: var(--mono); font-size: 12.5px; color: var(--danger-ink); line-height: 1.5;
+    background: color-mix(in srgb, var(--danger) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--danger) 30%, var(--line));
+    border-radius: 8px; padding: 10px 12px; margin: 10px 0;
+  }
+  .modal .confirm-check { display: flex; gap: 9px; align-items: flex-start; color: var(--ink); font-size: 13.5px; cursor: pointer; }
+  .modal .confirm-check input { margin-top: 3px; width: 17px; height: 17px; accent-color: var(--danger); flex: none; }
+  .modal .actions { display: flex; justify-content: flex-end; gap: 9px; padding: 8px 18px 18px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, .reveal { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><h1>ORTHANC</h1><span class="sub">operator console</span></div>
+  <div class="spacer"></div>
+  <div class="status"><span class="dot" id="dot"></span><span id="statusText">disconnected</span></div>
+  <button id="connectBtn">
+    <svg class="icon" viewBox="0 0 24 24"><path d="M9 7H6a3 3 0 0 0-3 3v0a3 3 0 0 0 3 3h3M15 7h3a3 3 0 0 1 3 3v0a3 3 0 0 1-3 3h-3M8 10h8"/></svg>
+    Connect
+  </button>
+  <button id="disconnectBtn" class="ghost" disabled>Disconnect</button>
+</header>
+
+<div class="arm-banner" id="armBanner" role="status">
+  <svg class="icon" viewBox="0 0 24 24"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7l8-4z"/></svg>
+  <span class="pulse" aria-hidden="true"></span>
+  <span id="armBannerText">DISARMED — recon only. Active TX is gated.</span>
+</div>
+
+<!-- polite announcer for screen readers: state + captures only, not the raw stream -->
+<div class="visually-hidden" role="status" aria-live="polite" id="sr"></div>
+
+<main>
+  <p class="note" id="support"></p>
+
+  <section class="cards">
+    <div class="card"><div class="label">Access points</div><div class="value" id="apCount">—</div></div>
+    <div class="card"><div class="label">Open networks</div><div class="value" id="openCount">—</div></div>
+    <div class="card"><div class="label">ESP uptime</div><div class="value" id="uptime">—</div></div>
+    <div class="card"><div class="label">Captures</div><div class="value capture" id="capCount">0</div></div>
+  </section>
+
+  <div class="cols">
+    <section class="panel">
+      <h2>
+        <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></svg>
+        Access points — tap a row to target
+      </h2>
+      <div id="tableWrap"><div class="empty">Connect an Orthanc device to begin.</div></div>
+    </section>
+
+    <div class="stack">
+      <section class="panel">
+        <h2>
+          <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+          Target &amp; arming
+        </h2>
+        <div class="panel-body">
+          <div class="target-box" id="targetBox">
+            <div class="empty" style="padding:8px 0">No target selected.</div>
+          </div>
+          <div style="display:flex; gap:8px; margin-top:13px">
+            <button id="armBtn" class="danger-outline" style="flex:1; justify-content:center">
+              <svg class="icon" viewBox="0 0 24 24"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7l8-4z"/></svg>
+              <span id="armBtnLabel">Arm</span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>
+          <svg class="icon" viewBox="0 0 24 24"><path d="M12 2v6M12 16v6M2 12h6M16 12h6"/><circle cx="12" cy="12" r="3"/></svg>
+          Attack
+        </h2>
+        <div class="panel-body">
+          <div class="mode-row">
+            <button id="autoBtn" class="danger" style="flex:1; justify-content:center" disabled>
+              <svg class="icon" viewBox="0 0 24 24"><path d="M6 4l14 8-14 8V4z"/></svg>
+              <span id="autoLabel">Run auto chain</span>
+            </button>
+          </div>
+          <div class="grid-2" id="advGrid">
+            <button class="danger-outline" data-cmd="deauth" disabled>
+              <svg class="icon" viewBox="0 0 24 24"><path d="M5 12a7 7 0 0 1 14 0M8 12a4 4 0 0 1 8 0"/><circle cx="12" cy="12" r="1.4"/><path d="M4 4l16 16"/></svg>
+              Deauth
+            </button>
+            <button class="danger-outline" data-cmd="pmkid" disabled>
+              <svg class="icon" viewBox="0 0 24 24"><circle cx="8" cy="12" r="4"/><path d="M12 12h8M17 12v4M20 12v3"/></svg>
+              PMKID
+            </button>
+            <button class="danger-outline" data-cmd="handshake" disabled>
+              <svg class="icon" viewBox="0 0 24 24"><path d="M8 12l3 3 5-6M4 7l5-3 6 2 5 3v6l-5 3-6-2-5-3z"/></svg>
+              Handshake
+            </button>
+            <button class="danger-outline" data-cmd="wps" disabled>
+              <svg class="icon" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
+              WPS
+            </button>
+            <button class="ghost" data-cmd="sniff" disabled>
+              <svg class="icon" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 18 0"/><path d="M7 12a5 5 0 0 1 10 0"/><circle cx="12" cy="12" r="1.4"/></svg>
+              Sniff
+            </button>
+            <button class="ghost" data-cmd="stations" disabled>
+              <svg class="icon" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+              Stations
+            </button>
+          </div>
+          <div class="field" style="margin-top:12px">
+            <label for="burstN">Deauth burst</label>
+            <input type="number" id="burstN" min="1" max="64" value="16" inputmode="numeric">
+            <span class="note">frames (1–64)</span>
+          </div>
+          <p class="hint" id="attackHint">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+            <span>Select a target and arm to enable active commands. Every command re-confirms the exact BSSID (Gate 2).</span>
+          </p>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>
+          <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5"/></svg>
+          Capture (PCAP)
+        </h2>
+        <div class="panel-body">
+          <div style="display:flex; gap:8px">
+            <button id="pcapBtn" class="ghost" style="flex:1; justify-content:center" disabled>
+              <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6"/></svg>
+              <span id="pcapLabel">Start PCAP</span>
+            </button>
+            <button id="pcapDl" class="ghost" style="flex:1; justify-content:center" disabled>
+              <svg class="icon" viewBox="0 0 24 24"><path d="M12 3v12M7 11l5 5 5-5M5 21h14"/></svg>
+              <span id="pcapDlLabel">Download (0)</span>
+            </button>
+          </div>
+          <p class="note" style="margin-top:10px">Streams the selected target's frames over USB and assembles a Wireshark / <code>hcxpcapngtool</code> .pcap in the browser (LINKTYPE_IEEE802_11). Passive capture — no arming. Use USB, not the Flipper UART.</p>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <section class="panel console reveal hidden-pre" id="consolePanel">
+    <div class="console-tools">
+      <div class="seg" role="group" aria-label="Log filter">
+        <button data-filter="all" aria-pressed="true">All</button>
+        <button data-filter="events">Events</button>
+        <button data-filter="captures">Captures</button>
+      </div>
+      <div class="spacer"></div>
+      <button class="ghost mini" id="pauseBtn" aria-pressed="false">Pause scroll</button>
+      <button class="ghost mini" id="clearBtn">Clear</button>
+      <span class="status"><span id="rxCount">0</span>&nbsp;lines</span>
+    </div>
+    <div id="log" role="log" aria-label="Raw device feed"></div>
+  </section>
+</main>
+
+<!-- Arm confirmation modal (Gate 1 mirror) -->
+<div class="scrim" id="armScrim" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="armTitle" aria-describedby="armDesc">
+    <h3 id="armTitle">
+      <svg class="icon" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+      Arm active transmission
+    </h3>
+    <div class="body">
+      <p id="armDesc" style="margin-top:0">Arming enables deauthentication and capture against the selected target.</p>
+      <div class="warn-box">
+        Deauth is a denial-of-service. Transmitting it against a network you are
+        not authorized to test is illegal in most jurisdictions. Proceed only on
+        networks you own or have explicit written authorization to assess.
+      </div>
+      <label class="confirm-check">
+        <input type="checkbox" id="armAck">
+        <span>I am authorized to test this network and accept responsibility for transmission.</span>
+      </label>
+    </div>
+    <div class="actions">
+      <button class="ghost" id="armCancel">Cancel</button>
+      <button class="danger" id="armConfirm" disabled>Arm device</button>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+let port = null, reader = null, keepReading = false, writerLock = false;
+let rxCount = 0, capCount = 0, armed = false, autoRunning = false;
+let target = null;            // { bssid, ssid, ch }
+let clients = [];             // MACs seen associated with the current target
+let filter = "all", paused = false;
+let pingTimer = null;
+let pcapOn = false;
+const pcapFrames = [];        // { ts, olen, bytes:Uint8Array } collected for the .pcap
+
+/* ---------- capability / support ---------- */
+const supported = "serial" in navigator;
+$("support").textContent = supported
+  ? "Speaks the Orthanc Wire Protocol (NDJSON @ 115200) over USB. Connect the ESP32-S2, or the Flipper once USB forwarding lands. Recon is passive; active TX stays behind the on-device gates."
+  : "This browser has no Web Serial API — use Chrome or Edge on desktop.";
+$("connectBtn").disabled = !supported;
+
+/* ---------- helpers ---------- */
+function announce(msg) { $("sr").textContent = msg; }
+function setStatus(state, text) { $("dot").className = "dot " + state; $("statusText").textContent = text; }
+function now() { const d = new Date(); return d.toTimeString().slice(0, 8); }
+function esc(s) { return String(s ?? "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
+
+/* ---------- console log ---------- */
+const CAT = { tx: "cmd", atk: "atk", hash: "hash", ackok: "ok", ackno: "fail",
+             sta: "sta", eapol: "eapol", hello: "hello", err: "err", wifi: "wifi", log: "log", info: "•" };
+const EVENT_CATS = new Set(["tx", "atk", "ackok", "ackno", "hash", "hello", "err"]);
+
+function logLine(text, cat) {
+  const el = $("log");
+  const div = document.createElement("div");
+  div.className = "ln new " + cat + (cat === "hash" ? " flash" : "");
+  div.dataset.cat = cat;
+  div.innerHTML = `<span class="t0">${now()}</span><span class="tag2">${CAT[cat] || ""}</span><span class="msg">${esc(text)}</span>`;
+  applyFilterTo(div);
+  el.appendChild(div);
+  // trim to keep the DOM light
+  while (el.childElementCount > 600) el.removeChild(el.firstChild);
+  if (!paused) el.scrollTop = el.scrollHeight;
+  rxCount++; $("rxCount").textContent = rxCount;
+}
+function applyFilterTo(div) {
+  const c = div.dataset.cat;
+  const show = filter === "all" ? true : filter === "captures" ? c === "hash" : EVENT_CATS.has(c);
+  div.style.display = show ? "" : "none";
+}
+function reflowFilter() { document.querySelectorAll("#log .ln").forEach(applyFilterTo); }
+
+/* ---------- send ---------- */
+async function send(obj) {
+  if (!port || !port.writable || writerLock) { logLine("not connected", "err"); return false; }
+  try {
+    writerLock = true;
+    const w = port.writable.getWriter();
+    await w.write(new TextEncoder().encode(JSON.stringify(obj) + "\n"));
+    w.releaseLock();
+    logLine("» " + JSON.stringify(obj), "tx");
+    return true;
+  } catch (e) { logLine("[send error] " + e.message, "err"); return false; }
+  finally { writerLock = false; }
+}
+
+/* ---------- armed state / gates ---------- */
+function setArmed(a) {
+  armed = a;
+  const b = $("armBanner");
+  b.className = "arm-banner" + (a ? " armed" : "");
+  $("armBannerText").textContent = a
+    ? "ARMED — active TX enabled. Authorized targets only."
+    : "DISARMED — recon only. Active TX is gated.";
+  $("armBtnLabel").textContent = a ? "Disarm" : "Arm";
+  $("armBtn").className = a ? "danger" : "danger-outline";
+  $("armBtn").style.flex = "1"; $("armBtn").style.justifyContent = "center";
+  refreshGates();
+}
+function refreshGates() {
+  const ready = armed && !!target;
+  $("advGrid").querySelectorAll("button").forEach(btn => {
+    // recon primitives (sniff/stations) only need a connection; attacks need arm+target
+    const reconOnly = btn.dataset.cmd === "stations";
+    btn.disabled = !port || (reconOnly ? false : !ready);
+  });
+  $("autoBtn").disabled = !ready && !autoRunning;
+  $("attackHint").style.display = ready ? "none" : "flex";
+}
+
+/* ---------- target selection ---------- */
+function setTarget(t) {
+  target = t;
+  clients = [];
+  const box = $("targetBox");
+  box.innerHTML = `
+    <div class="kv"><span class="k">SSID</span><span class="v">${esc(t.ssid || "—")}</span></div>
+    <div class="kv"><span class="k">BSSID</span><span class="v">${esc(t.bssid)}</span></div>
+    <div class="kv"><span class="k">Channel</span><span class="v">${t.ch || "?"}</span></div>
+    <div class="kv"><span class="k">Clients</span><span class="v" id="clientCount">0</span></div>
+    <div id="clientList" class="client-list"></div>`;
+  send({ t: "target", bssid: t.bssid, c: t.ch || 0 });
+  refreshGates();
+  markSelectedRow();
+  announce("Target set to " + (t.ssid || t.bssid));
+}
+
+/* Live clients associated with the current target — the deauth set. Seeing >0
+   means a 4-way capture is possible; 0 means try the clientless PMKID path. */
+function renderClients() {
+  const cc = $("clientCount"); if (cc) cc.textContent = clients.length;
+  const cl = $("clientList");
+  if (cl) cl.innerHTML = clients.map(m => `<span class="client-chip">${esc(m)}</span>`).join("");
+}
+function addClient(mac) {
+  if (!mac || clients.includes(mac)) return;
+  clients.push(mac);
+  renderClients();
+}
+function markSelectedRow() {
+  document.querySelectorAll("#tableWrap tbody tr").forEach(tr => {
+    tr.setAttribute("aria-selected", target && tr.dataset.bssid === target.bssid ? "true" : "false");
+  });
+}
+
+/* ---------- render scan ---------- */
+function encTag(e) { const open = /open/i.test(e || ""); return `<span class="tag ${open ? "open" : ""}">${esc(e || "?")}</span>`; }
+function rssiPct(r) { return Math.max(0, Math.min(100, ((r + 90) / 50) * 100)); }
+
+function renderWifi(msg) {
+  $("apCount").textContent = msg.n ?? "—";
+  const oc = $("openCount"); oc.textContent = msg.open ?? "—";
+  oc.className = "value" + (msg.open > 0 ? " warn" : "");
+  if (typeof msg.armed === "boolean" && msg.armed !== armed) setArmed(msg.armed);
+
+  const rows = (msg.top || []).map(a => {
+    const sel = target && a.b === target.bssid;
+    return `<tr tabindex="0" role="button" data-bssid="${esc(a.b)}" data-ssid="${esc(a.s)}" data-ch="${a.c}" aria-selected="${sel ? "true" : "false"}">
+      <td>${esc(a.s || "<hidden>")} ${sel ? '<span class="tgt-flag">◈ target</span>' : ""}</td>
+      <td class="num">${a.r} dBm</td>
+      <td class="num">${a.c}</td>
+      <td>${encTag(a.e)}</td>
+      <td><div class="rssi-bar"><i style="width:${rssiPct(a.r)}%"></i></div></td>
+    </tr>`; }).join("");
+
+  $("tableWrap").innerHTML = rows
+    ? `<table><thead><tr><th>SSID</th><th>RSSI</th><th>Ch</th><th>Enc</th><th>Signal</th></tr></thead><tbody>${rows}</tbody></table>`
+    : `<div class="empty">No access points in the last scan.</div>`;
+
+  $("tableWrap").querySelectorAll("tbody tr").forEach(tr => {
+    const pick = () => setTarget({ bssid: tr.dataset.bssid, ssid: tr.dataset.ssid === "<hidden>" ? "" : tr.dataset.ssid, ch: +tr.dataset.ch });
+    tr.addEventListener("click", pick);
+    tr.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } });
+  });
+}
+
+/* ---------- message routing ---------- */
+function handleMessage(o) {
+  if (typeof o.armed === "boolean" && o.armed !== armed) setArmed(o.armed);
+  switch (o.t) {
+    case "wifi": renderWifi(o); break;
+    case "pong": $("uptime").textContent = (o.up / 1000).toFixed(0) + "s"; break;
+    case "hello":
+      logLine(`${o.fw} v${o.ver} — cap=[${(o.cap || []).join(",")}]`, "hello");
+      announce("Connected to " + o.fw + " " + o.ver); break;
+    case "atk":
+      logLine(`[${o.st}] ${o.m}`, "atk");
+      if (o.st === "start") { autoRunning = true; setAutoBtn(); }
+      if (o.st === "stop" || o.st === "report") { autoRunning = false; setAutoBtn(); }
+      break;
+    case "hash":
+      capCount++; $("capCount").textContent = capCount;
+      logLine(`${(o.kind || "").toUpperCase()} ${o.ssid || o.bssid} → ${o.line}`, "hash");
+      announce("Capture obtained: " + (o.kind || "hash") + " for " + (o.ssid || o.bssid)); break;
+    case "ack": logLine(`${o.c}: ${o.m}`, o.ok ? "ackok" : "ackno"); break;
+    case "sta": logLine(`station ${o.mac} ${o.r ? "(" + o.r + " dBm)" : ""}`, "sta"); break;
+    case "client":
+      if (target && o.bssid === target.bssid) addClient(o.mac);
+      logLine(`client ${o.mac} on ${o.bssid}`, "sta"); break;
+    case "eapol": logLine(`EAPOL on ${o.bssid} (${o.r} dBm)`, "eapol"); break;
+    case "stalist": logLine(`stations: ${o.n}`, "info"); break;
+    case "pcap": collectPcap(o); break;   // high-volume: no per-frame console line
+    case "log": logLine(o.m, "log"); break;
+    default: break;
+  }
+}
+
+/* ---------- PCAP capture ---------- */
+function b64ToBytes(s) {
+  try { const bin = atob(s); const u = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; }
+  catch { return null; }
+}
+function collectPcap(o) {
+  const bytes = b64ToBytes(o.d); if (!bytes) return;
+  pcapFrames.push({ ts: o.ts || 0, olen: o.olen || bytes.length, bytes });
+  if (pcapFrames.length > 50000) pcapFrames.shift();   // bound memory
+  updatePcapUi();
+}
+function updatePcapUi() {
+  $("pcapDlLabel").textContent = `Download (${pcapFrames.length})`;
+  $("pcapDl").disabled = pcapFrames.length === 0;
+}
+function buildPcapBlob() {
+  let total = 24; for (const f of pcapFrames) total += 16 + f.bytes.length;
+  const buf = new ArrayBuffer(total), dv = new DataView(buf), u8 = new Uint8Array(buf);
+  let p = 0;
+  dv.setUint32(p, 0xa1b2c3d4, true); p += 4;   // magic
+  dv.setUint16(p, 2, true); p += 2;            // version major
+  dv.setUint16(p, 4, true); p += 2;            // version minor
+  dv.setInt32(p, 0, true); p += 4;             // thiszone
+  dv.setUint32(p, 0, true); p += 4;            // sigfigs
+  dv.setUint32(p, 65535, true); p += 4;        // snaplen
+  dv.setUint32(p, 105, true); p += 4;          // network = LINKTYPE_IEEE802_11
+  for (const f of pcapFrames) {
+    dv.setUint32(p, Math.floor(f.ts / 1000), true); p += 4;   // ts_sec (device uptime)
+    dv.setUint32(p, (f.ts % 1000) * 1000, true); p += 4;      // ts_usec
+    dv.setUint32(p, f.bytes.length, true); p += 4;            // incl_len (may be < orig)
+    dv.setUint32(p, f.olen, true); p += 4;                    // orig_len
+    u8.set(f.bytes, p); p += f.bytes.length;
+  }
+  return new Blob([buf], { type: "application/vnd.tcpdump.pcap" });
+}
+function downloadPcap() {
+  if (!pcapFrames.length) return;
+  const url = URL.createObjectURL(buildPcapBlob());
+  const a = document.createElement("a");
+  a.href = url; a.download = `orthanc-${Date.now()}.pcap`; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  announce(`Downloaded ${pcapFrames.length} frames as pcap`);
+}
+function togglePcap() {
+  pcapOn = !pcapOn;
+  send({ t: "pcap", on: pcapOn });
+  $("pcapLabel").textContent = pcapOn ? "Stop PCAP" : "Start PCAP";
+  $("pcapBtn").className = pcapOn ? "danger-outline" : "ghost";
+  $("pcapBtn").style.flex = "1"; $("pcapBtn").style.justifyContent = "center";
+}
+function setAutoBtn() {
+  $("autoLabel").textContent = autoRunning ? "Stop auto chain" : "Run auto chain";
+  $("autoBtn").disabled = autoRunning ? false : !(armed && target);
+}
+
+/* ---------- read loop ---------- */
+async function readLoop() {
+  const decoder = new TextDecoderStream();
+  const closed = port.readable.pipeTo(decoder.writable).catch(() => {});
+  reader = decoder.readable.getReader();
+  let buf = "";
+  try {
+    while (keepReading) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += value;
+      let nl;
+      while ((nl = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!line) continue;
+        try { handleMessage(JSON.parse(line)); }
+        catch { logLine(line, "log"); }   // non-JSON: still show it raw
+      }
+    }
+  } catch (e) { logLine("[read error] " + e.message, "err"); }
+  finally { try { reader.releaseLock(); } catch {} await closed; }
+}
+
+/* ---------- connect / disconnect ---------- */
+async function connect() {
+  try {
+    port = await navigator.serial.requestPort();
+    await port.open({ baudRate: 115200 });
+    keepReading = true;
+    setStatus("up", "connected");
+    $("connectBtn").disabled = true; $("disconnectBtn").disabled = false;
+    $("consolePanel").classList.remove("hidden-pre");
+    $("pcapBtn").disabled = false;
+    refreshGates();
+    readLoop();
+    await send({ t: "ping" });
+    pingTimer = setInterval(() => send({ t: "ping" }), 5000);
+  } catch (e) { setStatus("down", "failed"); logLine("[connect] " + e.message, "err"); }
+}
+async function disconnect() {
+  keepReading = false;
+  clearInterval(pingTimer); pingTimer = null;
+  try { await reader?.cancel(); } catch {}
+  try { await port?.close(); } catch {}
+  port = null; setStatus("", "disconnected");
+  $("connectBtn").disabled = false; $("disconnectBtn").disabled = true;
+  if (pcapOn) { pcapOn = false; $("pcapLabel").textContent = "Start PCAP"; $("pcapBtn").className = "ghost"; }
+  $("pcapBtn").disabled = true;
+  refreshGates();
+}
+
+/* ---------- attack dispatch ---------- */
+function fire(cmd) {
+  if (cmd === "stations") return send({ t: "stations" });
+  if (!target) { announce("No target selected"); return; }
+  const bssid = target.bssid;
+  if (cmd === "deauth") {
+    let n = parseInt($("burstN").value, 10); if (isNaN(n)) n = 16; n = Math.max(1, Math.min(64, n));
+    return send({ t: "deauth", bssid, n });
+  }
+  if (cmd === "sniff") return send({ t: "sniff", on: true, bssid });
+  return send({ t: cmd, bssid });   // pmkid / handshake / wps
+}
+
+/* ---------- arm modal (Gate 1) ---------- */
+let lastFocus = null;
+function openArm() {
+  lastFocus = document.activeElement;
+  $("armAck").checked = false; $("armConfirm").disabled = true;
+  $("armScrim").hidden = false;
+  $("armAck").focus();
+}
+function closeArm() { $("armScrim").hidden = true; if (lastFocus) lastFocus.focus(); }
+
+/* ---------- wire up ---------- */
+$("connectBtn").addEventListener("click", connect);
+$("disconnectBtn").addEventListener("click", disconnect);
+
+$("armBtn").addEventListener("click", () => { if (armed) send({ t: "disarm" }); else openArm(); });
+$("armAck").addEventListener("change", e => { $("armConfirm").disabled = !e.target.checked; });
+$("armCancel").addEventListener("click", closeArm);
+$("armConfirm").addEventListener("click", () => { send({ t: "arm", ack: "AUTHORIZED" }); closeArm(); });
+$("armScrim").addEventListener("click", e => { if (e.target === $("armScrim")) closeArm(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("armScrim").hidden) closeArm(); });
+
+$("autoBtn").addEventListener("click", () => {
+  if (autoRunning) send({ t: "auto", stop: true });
+  else if (target) send({ t: "auto", bssid: target.bssid });
+});
+$("advGrid").addEventListener("click", e => {
+  const btn = e.target.closest("button[data-cmd]"); if (btn && !btn.disabled) fire(btn.dataset.cmd);
+});
+
+document.querySelectorAll(".seg button").forEach(b => b.addEventListener("click", () => {
+  filter = b.dataset.filter;
+  document.querySelectorAll(".seg button").forEach(x => x.setAttribute("aria-pressed", x === b ? "true" : "false"));
+  reflowFilter();
+}));
+$("pauseBtn").addEventListener("click", () => {
+  paused = !paused;
+  $("pauseBtn").setAttribute("aria-pressed", paused ? "true" : "false");
+  $("pauseBtn").textContent = paused ? "Resume scroll" : "Pause scroll";
+  if (!paused) $("log").scrollTop = $("log").scrollHeight;
+});
+$("clearBtn").addEventListener("click", () => { $("log").innerHTML = ""; rxCount = 0; $("rxCount").textContent = 0; });
+$("pcapBtn").addEventListener("click", togglePcap);
+$("pcapDl").addEventListener("click", downloadPcap);
+
+setArmed(false);
+</script>
+</body>
+</html>
