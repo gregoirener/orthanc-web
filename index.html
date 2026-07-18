@@ -1012,11 +1012,15 @@ async function doFlash() {
   try {
     if (port) { st("Closing console connection…"); await disconnect(); }
     st("Fetching latest firmware from GitHub…");
-    const man = await (await fetch(FW_MANIFEST_URL, { cache: "no-store" })).json();
+    const manRes = await fetch(FW_MANIFEST_URL, { cache: "no-store" });
+    if (!manRes.ok) throw new Error(`Couldn't fetch the firmware manifest (HTTP ${manRes.status}). If the firmware was just updated, GitHub may need a minute to propagate — retry shortly.`);
+    const man = await manRes.json();
     const fileArray = [];
     for (const p of man.parts) {
       const url = new URL(p.path, FW_MANIFEST_URL).href;
-      const buf = await (await fetch(url, { cache: "no-store" })).arrayBuffer();
+      const binRes = await fetch(url, { cache: "no-store" });
+      if (!binRes.ok) throw new Error(`Couldn't download the firmware image (HTTP ${binRes.status}). Retry in a moment.`);
+      const buf = await binRes.arrayBuffer();
       fileArray.push({ data: bufToBinStr(buf), address: p.offset });
     }
     flashLog(`fetched orthanc-esp v${man.version} (${(man.size / 1024 | 0)} KB)`);
