@@ -129,6 +129,11 @@
   .tag { font-size: 10px; padding: 1px 6px; border-radius: 5px; border: 1px solid var(--line); color: var(--muted); font-family: var(--mono); }
   .tag.open { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); }
   .tgt-flag { color: var(--tx); font-weight: 700; }
+  .cli-badge {
+    font-size: 10px; font-weight: 600; margin-left: 6px; padding: 1px 6px;
+    border-radius: 5px; font-family: var(--mono); white-space: nowrap;
+    color: var(--accent-ink); border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line));
+  }
 
   /* ---- target panel ---- */
   .target-box { font-family: var(--mono); font-size: 13px; display: grid; gap: 5px; }
@@ -322,6 +327,10 @@
               <svg class="icon" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
               Stations
             </button>
+            <button class="ghost" data-cmd="survey" disabled>
+              <svg class="icon" viewBox="0 0 24 24"><path d="M3 12h4l2-7 4 14 2-7h4"/></svg>
+              Survey
+            </button>
           </div>
           <div class="field" style="margin-top:12px">
             <label for="burstN">Deauth burst</label>
@@ -406,6 +415,8 @@ let port = null, reader = null, keepReading = false, writerLock = false;
 let rxCount = 0, capCount = 0, armed = false, autoRunning = false;
 let target = null;            // { bssid, ssid, ch }
 let clients = [];             // MACs seen associated with the current target
+let surveyClients = {};       // bssid -> { ch, clients } from the channel-hop survey
+let lastWifi = null;          // last wifi scan msg, so survey badges can re-render it
 let filter = "all", paused = false;
 let pingTimer = null;
 let pcapOn = false;
@@ -479,8 +490,8 @@ function setArmed(a) {
 function refreshGates() {
   const ready = armed && !!target;
   $("advGrid").querySelectorAll("button").forEach(btn => {
-    // recon primitives (sniff/stations) only need a connection; attacks need arm+target
-    const reconOnly = btn.dataset.cmd === "stations";
+    // recon primitives (stations/survey) only need a connection; attacks need arm+target
+    const reconOnly = btn.dataset.cmd === "stations" || btn.dataset.cmd === "survey";
     btn.disabled = !port || (reconOnly ? false : !ready);
   });
   $("autoBtn").disabled = !ready && !autoRunning;
@@ -527,6 +538,7 @@ function encTag(e) { const open = /open/i.test(e || ""); return `<span class="ta
 function rssiPct(r) { return Math.max(0, Math.min(100, ((r + 90) / 50) * 100)); }
 
 function renderWifi(msg) {
+  lastWifi = msg;
   $("apCount").textContent = msg.n ?? "—";
   const oc = $("openCount"); oc.textContent = msg.open ?? "—";
   oc.className = "value" + (msg.open > 0 ? " warn" : "");
@@ -534,8 +546,10 @@ function renderWifi(msg) {
 
   const rows = (msg.top || []).map(a => {
     const sel = target && a.b === target.bssid;
+    const sv = surveyClients[a.b];
+    const cliBadge = sv && sv.clients > 0 ? `<span class="cli-badge">${sv.clients} client${sv.clients > 1 ? "s" : ""}</span>` : "";
     return `<tr tabindex="0" role="button" data-bssid="${esc(a.b)}" data-ssid="${esc(a.s)}" data-ch="${a.c}" aria-selected="${sel ? "true" : "false"}">
-      <td>${esc(a.s || "<hidden>")} ${sel ? '<span class="tgt-flag">◈ target</span>' : ""}</td>
+      <td>${esc(a.s || "<hidden>")} ${sel ? '<span class="tgt-flag">◈ target</span>' : ""}${cliBadge}</td>
       <td class="num">${a.r} dBm</td>
       <td class="num">${a.c}</td>
       <td>${encTag(a.e)}</td>
@@ -576,6 +590,19 @@ function handleMessage(o) {
     case "client":
       if (target && o.bssid === target.bssid) addClient(o.mac);
       logLine(`client ${o.mac} on ${o.bssid}`, "sta"); break;
+    case "survey":
+      if (o.start) { surveyClients = {}; logLine("survey: hopping channels 1–13 (passive)…", "info"); }
+      else if (o.done) {
+        const n = Object.keys(surveyClients).length;
+        logLine(`survey done — ${n} AP(s) with clients (of ${o.aps} seen)`, "info");
+        announce(`Survey done: ${n} access point(s) with clients`);
+        if (lastWifi) renderWifi(lastWifi);
+      } else if (o.bssid) {
+        surveyClients[o.bssid] = { ch: o.ch, clients: o.clients };
+        logLine(`survey: ${o.bssid} ch${o.ch} → ${o.clients} client(s)`, "sta");
+        if (lastWifi) renderWifi(lastWifi);
+      }
+      break;
     case "eapol": logLine(`EAPOL on ${o.bssid} (${o.r} dBm)`, "eapol"); break;
     case "stalist": logLine(`stations: ${o.n}`, "info"); break;
     case "pcap": collectPcap(o); break;   // high-volume: no per-frame console line
@@ -695,6 +722,7 @@ async function disconnect() {
 /* ---------- attack dispatch ---------- */
 function fire(cmd) {
   if (cmd === "stations") return send({ t: "stations" });
+  if (cmd === "survey") return send({ t: "survey" });
   if (!target) { announce("No target selected"); return; }
   const bssid = target.bssid;
   if (cmd === "deauth") {
