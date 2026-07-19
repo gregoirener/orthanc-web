@@ -6,31 +6,32 @@
 <title>Orthanc — Operator Console</title>
 <style>
   :root {
-    /* dark-first technical palette; light kept as an accessible fallback */
-    --bg: #0b0e13; --panel: #12171f; --elev: #161d27; --line: #232c38;
-    --ink: #e6ecf3; --muted: #93a1b1; --faint: #66748a;
-    --accent: #3fb287; --accent-ink: #7fe4bf;      /* recon / ok */
-    --danger: #f0574f; --danger-ink: #ff8a84;      /* armed / active TX */
-    --warn: #e0a44f;                                /* caution / open nets */
-    --capture: #ffd166;                             /* hash / the prize */
-    --tx: #7aa2ff;                                  /* outbound commands */
-    --sta: #58b0ff; --eapol: #c792ea;
-    --bar-bg: #1c2531; --scrim: rgba(4,7,11,.62);
+    /* warm, woody dark palette — calm greige surfaces, muted earthy accents */
+    --bg: #1a1712; --panel: #221e18; --elev: #2a241c; --line: #3a3229;
+    --ink: #ece3d5; --muted: #b0a48f; --faint: #7e7260;
+    --accent: #94a56a; --accent-ink: #c4d18e;      /* recon / ok — sage */
+    --danger: #dd6350; --danger-ink: #ff9c82;      /* armed / active TX — clay red */
+    --warn: #d69a4d;                                /* caution / open nets — amber */
+    --capture: #e8b45c;                             /* hash / the prize — warm gold */
+    --tx: #6fa093;                                  /* outbound commands — dusty teal */
+    --sta: #93a6a2; --eapol: #b98aa4;               /* muted slate / mauve */
+    --bar-bg: #2f2820; --scrim: rgba(12,9,6,.64);
     --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
     --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     --r: 10px; --r-sm: 7px;
-    --sh-1: 0 1px 2px rgba(0,0,0,.4);
-    --sh-2: 0 6px 20px rgba(0,0,0,.45);
+    --sh-1: 0 1px 2px rgba(0,0,0,.35);
+    --sh-2: 0 6px 20px rgba(0,0,0,.4);
   }
   @media (prefers-color-scheme: light) {
     :root {
-      --bg: #eef1f5; --panel: #ffffff; --elev: #f6f8fa; --line: #d9dfe6;
-      --ink: #12181f; --muted: #55616e; --faint: #8592a0;
-      --accent: #1f7a5c; --accent-ink: #0b4c38;
-      --danger: #c23a34; --danger-ink: #922a25; --warn: #a5641b;
-      --capture: #9a6b00; --tx: #2f5fd0; --sta: #1f6bb8; --eapol: #7a3fb0;
-      --bar-bg: #e7ebef; --scrim: rgba(20,24,31,.45);
-      --sh-2: 0 6px 20px rgba(20,30,50,.14);
+      /* warm parchment light mode */
+      --bg: #ece5d8; --panel: #f8f3ea; --elev: #f2ecdf; --line: #d8ceba;
+      --ink: #2a2318; --muted: #6b5f4b; --faint: #97896f;
+      --accent: #5c6f36; --accent-ink: #3d4b1f;
+      --danger: #b8412f; --danger-ink: #8a2e20; --warn: #97671c;
+      --capture: #876210; --tx: #3a7767; --sta: #52736f; --eapol: #8a5670;
+      --bar-bg: #e2d9c7; --scrim: rgba(40,32,20,.42);
+      --sh-2: 0 6px 20px rgba(60,45,25,.14);
     }
   }
   * { box-sizing: border-box; }
@@ -172,9 +173,9 @@
   #log {
     font-family: var(--mono); font-size: 12px; line-height: 1.55; margin: 0;
     height: 300px; overflow-y: auto; overflow-x: hidden; padding: 10px 14px;
-    background: #090c11; scroll-behavior: smooth; overscroll-behavior: contain;
+    background: #14110b; scroll-behavior: smooth; overscroll-behavior: contain;
   }
-  @media (prefers-color-scheme: light) { #log { background: #0d1117; color: #e6ecf3; } }
+  @media (prefers-color-scheme: light) { #log { background: #211c13; color: #ece3d5; } }
   .ln { display: flex; gap: 9px; padding: 1px 0; white-space: pre-wrap; word-break: break-word; }
   .ln .t0 { color: var(--faint); flex: none; font-variant-numeric: tabular-nums; }
   .ln .tag2 { flex: none; width: 52px; color: var(--faint); text-transform: uppercase; }
@@ -289,12 +290,66 @@
   .flash-result h4 { margin: 0 0 3px; font-size: 15px; color: var(--ink); }
   .flash-result p { margin: 0; color: var(--muted); font-size: 13px; }
 
+  /* ---- boot splash (Flipper-style opening) ---- */
+  #boot { position: fixed; inset: 0; z-index: 9999; background: var(--bg);
+    display: grid; place-items: center; overflow: hidden;
+    transition: opacity .45s ease, transform .45s ease; }
+  #boot.done { opacity: 0; transform: scale(1.03); pointer-events: none; }
+  #boot::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+    box-shadow: inset 0 0 200px 50px rgba(0,0,0,.45); }
+  .boot-inner { position: relative; z-index: 1; display: grid; justify-items: center; gap: 13px; }
+  .boot-logo { width: 104px; height: 104px; }
+  .boot-logo .r { fill: none; stroke: var(--accent); stroke-width: 2; opacity: 0;
+    transform-box: fill-box; transform-origin: center; animation: ringIn .6s ease-out forwards; }
+  .boot-logo .r1 { animation-delay: .05s; }
+  .boot-logo .r2 { animation-delay: .2s; stroke: color-mix(in srgb, var(--accent) 68%, var(--faint)); }
+  .boot-logo .r3 { animation-delay: .35s; stroke: color-mix(in srgb, var(--accent) 42%, var(--faint)); }
+  .boot-logo .dot { fill: var(--capture); stroke: none; opacity: 0; animation: ringIn .5s ease-out .12s forwards; }
+  .boot-logo .tick { stroke: var(--faint); stroke-width: 2; stroke-linecap: round; opacity: 0; animation: ringIn .6s ease-out .45s forwards; }
+  .boot-logo .sweep { stroke: var(--capture); stroke-width: 2; stroke-linecap: round;
+    transform-box: view-box; transform-origin: 52px 52px; animation: sweep 1.5s linear infinite; }
+  @keyframes ringIn { from { opacity: 0; transform: scale(.6); } to { opacity: 1; transform: scale(1); } }
+  @keyframes sweep { to { transform: rotate(360deg); } }
+  .boot-word { font-family: var(--mono); font-weight: 700; font-size: 30px; letter-spacing: .28em;
+    color: var(--ink); padding-left: .28em; opacity: 0; animation: wordIn .8s ease-out .45s forwards; }
+  @keyframes wordIn { from { opacity: 0; letter-spacing: .9em; padding-left: .9em; } to { opacity: 1; letter-spacing: .28em; padding-left: .28em; } }
+  .boot-sub { font-family: var(--mono); font-size: 11px; letter-spacing: .22em; color: var(--muted);
+    text-transform: uppercase; opacity: 0; animation: bootUp .6s ease-out .82s forwards; }
+  .boot-bar { width: 190px; height: 3px; background: var(--bar-bg); border-radius: 999px; overflow: hidden; margin-top: 5px; }
+  .boot-bar i { display: block; height: 100%; width: 0; background: var(--accent); border-radius: 999px; animation: bootBar 1.7s ease-out .3s forwards; }
+  @keyframes bootBar { to { width: 100%; } }
+  .boot-status { font-family: var(--mono); font-size: 11px; color: var(--faint); min-height: 14px;
+    opacity: 0; animation: bootUp .6s ease-out 1s forwards; }
+  @keyframes bootUp { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+  .boot-scan { position: absolute; left: 0; right: 0; height: 130px; pointer-events: none; z-index: 0;
+    background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--accent) 12%, transparent), transparent);
+    animation: bootScan 2.2s ease-in-out infinite; }
+  @keyframes bootScan { 0% { transform: translateY(-32vh); opacity: 0; } 22% { opacity: 1; } 80% { opacity: 1; } 100% { transform: translateY(82vh); opacity: 0; } }
+
   @media (prefers-reduced-motion: reduce) {
+    #boot { display: none !important; }
     *, .reveal { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
   }
 </style>
 </head>
 <body>
+<div id="boot">
+  <div class="boot-scan"></div>
+  <div class="boot-inner">
+    <svg class="boot-logo" viewBox="0 0 104 104" aria-hidden="true">
+      <circle class="r r3" cx="52" cy="52" r="40"/>
+      <circle class="r r2" cx="52" cy="52" r="26"/>
+      <circle class="r r1" cx="52" cy="52" r="13"/>
+      <path class="tick" d="M52 4v10M52 90v10M4 52h10M90 52h10"/>
+      <line class="sweep" x1="52" y1="52" x2="52" y2="12"/>
+      <circle class="dot" cx="52" cy="52" r="3.4"/>
+    </svg>
+    <div class="boot-word">ORTHANC</div>
+    <div class="boot-sub">operator console</div>
+    <div class="boot-bar"><i></i></div>
+    <div class="boot-status" id="bootStatus">initializing radio…</div>
+  </div>
+</div>
 <header>
   <div class="brand"><h1>ORTHANC</h1><span class="sub">operator console</span></div>
   <div class="spacer"></div>
@@ -546,6 +601,27 @@
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
+
+/* ---------- boot splash ---------- */
+(function boot() {
+  const b = $("boot");
+  if (!b) return;
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) { b.remove(); return; }
+  const status = $("bootStatus");
+  const msgs = ["initializing radio…", "opening serial bridge…", "loading operator console…", "ready"];
+  let i = 0;
+  const cyc = setInterval(() => { i = Math.min(i + 1, msgs.length - 1); if (status) status.textContent = msgs[i]; }, 470);
+  let done = false;
+  const finish = () => {
+    if (done) return; done = true;
+    clearInterval(cyc);
+    b.classList.add("done");
+    setTimeout(() => b.remove(), 520);
+  };
+  const t = setTimeout(finish, 2200);
+  b.addEventListener("pointerdown", () => { clearTimeout(t); finish(); });
+  addEventListener("keydown", () => { clearTimeout(t); finish(); }, { once: true });
+})();
 let port = null, reader = null, keepReading = false, writerLock = false;
 let rxCount = 0, capCount = 0, armed = false, autoRunning = false;
 let target = null;            // { bssid, ssid, ch }
