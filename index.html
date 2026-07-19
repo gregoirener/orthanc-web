@@ -796,6 +796,13 @@ function handleMessage(o) {
       capCount++; $("capCount").textContent = capCount;
       logLine(`${(o.kind || "").toUpperCase()} ${o.ssid || o.bssid} → ${o.line}`, "hash");
       announce("Capture obtained: " + (o.kind || "hash") + " for " + (o.ssid || o.bssid)); break;
+    case "wps":
+      if (o.kind === "pixie") {
+        capCount++; $("capCount").textContent = capCount;
+        logLine(`WPS PIXIE ${o.ssid || o.bssid} → ${o.cmd}`, "hash");
+        announce("WPS Pixie inputs captured for " + (o.ssid || o.bssid));
+      } else logLine(o.m || "wps", "info");
+      break;
     case "ack": logLine(`${o.c}: ${o.m}`, o.ok ? "ackok" : "ackno"); break;
     case "sta": logLine(`station ${o.mac} ${o.r ? "(" + o.r + " dBm)" : ""}`, "sta"); break;
     case "client":
