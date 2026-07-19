@@ -26,13 +26,13 @@ everything runs locally in your browser. No data leaves the machine.
 ## Flash firmware from the browser
 
 Click **Flash** in the header to write the latest Orthanc firmware to an ESP32-S2
-over USB — no Arduino toolchain needed. It fetches the pre-built image from GitHub
-(`esp32/firmware/` in the main repo) and flashes it with
-[esptool-js](https://github.com/espressif/esptool-js). A browser can't compile a
-`.ino`, so the flasher ships this compiled image; refresh it with
-`./esp32/make-webflash-bin.sh` after firmware changes. Put the board in download
-mode first (hold **BOOT**, tap **RESET**, release **BOOT**), then Proceed.
-Chromium browser required.
+over USB — no Arduino toolchain needed. It fetches the pre-built image served from
+this repo's [`firmware/`](firmware/) directory (same-origin on Vercel) and flashes
+it with [esptool-js](https://github.com/espressif/esptool-js). A browser can't
+compile a `.ino`, so the flasher ships this compiled image; the main repo's
+`./esp32/make-webflash-bin.sh` rebuilds it and syncs it here after firmware
+changes. Put the board in download mode first (hold **BOOT**, tap **RESET**,
+release **BOOT**), then Proceed. Chromium browser required.
 
 ## Requirements
 

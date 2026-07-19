@@ -1,0 +1,14 @@
+{
+  "name": "orthanc-esp",
+  "version": "0.3.2",
+  "chip": "ESP32-S2",
+  "builtAt": "2026-07-19T16:48:16Z",
+  "parts": [
+    {
+      "path": "orthanc-esp.merged.bin",
+      "offset": 0
+    }
+  ],
+  "size": 977120,
+  "sha256": "b829654332956d278f0a6695c10df17d8987a3fffdbe4fd5779a437b3da06e55"
+}

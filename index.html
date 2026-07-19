@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Orthanc — Operator Console</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394a56a' stroke-width='2'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Ccircle cx='12' cy='12' r='3.4' fill='%23e8b45c' stroke='none'/%3E%3C/svg%3E">
 <style>
   :root {
     /* warm, woody dark palette — calm greige surfaces, muted earthy accents */
@@ -996,8 +997,26 @@ $("pcapBtn").addEventListener("click", togglePcap);
 $("pcapDl").addEventListener("click", downloadPcap);
 
 /* ---------- firmware flasher (Web Serial / esptool-js) ---------- */
-const FW_MANIFEST_URL = "https://raw.githubusercontent.com/gregoirener/orthanc/main/esp32/firmware/manifest.json";
+// Firmware is served from the PUBLIC orthanc-web repo (the private main repo 404s
+// on raw.githubusercontent). Same-origin first (Vercel — no CORS/CDN lag), then a
+// public-raw fallback for other hosting.
+const FW_MANIFEST_CANDIDATES = [
+  "firmware/manifest.json",
+  "https://raw.githubusercontent.com/gregoirener/orthanc-web/main/firmware/manifest.json"
+];
 const ESPTOOL_URL = "https://cdn.jsdelivr.net/npm/esptool-js@0.6.0/+esm";
+
+async function fetchManifest() {
+  let last = "";
+  for (const src of FW_MANIFEST_CANDIDATES) {
+    try {
+      const r = await fetch(src, { cache: "no-store" });
+      if (r.ok) return { man: await r.json(), base: new URL(src, location.href).href };
+      last = "HTTP " + r.status;
+    } catch (e) { last = e.message; }
+  }
+  throw new Error(`Couldn't fetch the firmware manifest (${last}). If the site was just deployed, wait a moment and retry.`);
+}
 const SVG_CHECK = '<svg class="icon" viewBox="0 0 24 24" style="width:18px;height:18px"><path d="M20 6 9 17l-5-5"/></svg>';
 const SVG_X = '<svg class="icon" viewBox="0 0 24 24" style="width:18px;height:18px"><path d="M18 6 6 18M6 6l12 12"/></svg>';
 let flashState = "idle", flashLastFocus = null;
@@ -1038,9 +1057,9 @@ async function loadFwMeta() {
     $("flashProceed").disabled = true; return;
   }
   try {
-    const man = await (await fetch(FW_MANIFEST_URL, { cache: "no-store" })).json();
+    const { man } = await fetchManifest();
     m.innerHTML = `Latest: <b>orthanc-esp v${esc(man.version)}</b> · ${esc(man.chip)} · ${(man.size / 1024 | 0)} KB`;
-  } catch { m.textContent = "Latest firmware will be fetched from GitHub when you proceed."; }
+  } catch { m.textContent = "Latest firmware will be fetched when you proceed."; }
 }
 
 function openFlash() {
@@ -1094,13 +1113,11 @@ async function doFlash() {
   let transport;
   try {
     if (port) { st("Closing console connection…"); await disconnect(); }
-    st("Fetching latest firmware from GitHub…");
-    const manRes = await fetch(FW_MANIFEST_URL, { cache: "no-store" });
-    if (!manRes.ok) throw new Error(`Couldn't fetch the firmware manifest (HTTP ${manRes.status}). If the firmware was just updated, GitHub may need a minute to propagate — retry shortly.`);
-    const man = await manRes.json();
+    st("Fetching latest firmware…");
+    const { man, base } = await fetchManifest();
     const fileArray = [];
     for (const p of man.parts) {
-      const url = new URL(p.path, FW_MANIFEST_URL).href;
+      const url = new URL(p.path, base).href;
       const binRes = await fetch(url, { cache: "no-store" });
       if (!binRes.ok) throw new Error(`Couldn't download the firmware image (HTTP ${binRes.status}). Retry in a moment.`);
       const buf = await binRes.arrayBuffer();
