@@ -1021,8 +1021,8 @@ const SVG_CHECK = '<svg class="icon" viewBox="0 0 24 24" style="width:18px;heigh
 const SVG_X = '<svg class="icon" viewBox="0 0 24 24" style="width:18px;height:18px"><path d="M18 6 6 18M6 6l12 12"/></svg>';
 let flashState = "idle", flashLastFocus = null;
 
-function bufToBinStr(buf) {
-  const u8 = new Uint8Array(buf); let s = ""; const CH = 0x8000;
+function u8ToBinStr(u8) {
+  let s = ""; const CH = 0x8000;
   for (let i = 0; i < u8.length; i += CH) s += String.fromCharCode.apply(null, u8.subarray(i, i + CH));
   return s;
 }
@@ -1115,15 +1115,24 @@ async function doFlash() {
     if (port) { st("Closing console connection…"); await disconnect(); }
     st("Fetching latest firmware…");
     const { man, base } = await fetchManifest();
+    // Split into <=128KB chunks. esptool-js compressed writes (FLASH_DEFL_DATA)
+    // desync over the S2's USB-CDC on long transfers ("failed to write compressed
+    // data after seq N"), and its uncompressed path is unimplemented in 0.6.0
+    // ("Yet to handle Non Compressed writes"). Short per-chunk transfers stay
+    // reliable and reset the stream between chunks.
+    const CHUNK = 0x20000;
     const fileArray = [];
     for (const p of man.parts) {
       const url = new URL(p.path, base).href;
       const binRes = await fetch(url, { cache: "no-store" });
       if (!binRes.ok) throw new Error(`Couldn't download the firmware image (HTTP ${binRes.status}). Retry in a moment.`);
-      const buf = await binRes.arrayBuffer();
-      fileArray.push({ data: bufToBinStr(buf), address: p.offset });
+      const u8 = new Uint8Array(await binRes.arrayBuffer());
+      for (let off = 0; off < u8.length; off += CHUNK)
+        fileArray.push({ data: u8ToBinStr(u8.subarray(off, Math.min(off + CHUNK, u8.length))), address: p.offset + off });
     }
-    flashLog(`fetched orthanc-esp v${man.version} (${(man.size / 1024 | 0)} KB)`);
+    flashLog(`fetched orthanc-esp v${man.version} (${(man.size / 1024 | 0)} KB, ${fileArray.length} chunks)`);
+    const total = fileArray.reduce((a, c) => a + c.data.length, 0);
+    const bases = []; { let acc = 0; for (const c of fileArray) { bases.push(acc); acc += c.data.length; } }
     st("Loading flasher…");
     const { ESPLoader, Transport } = await import(ESPTOOL_URL);
     st("Select the ESP32 serial port in the browser prompt…");
@@ -1134,13 +1143,10 @@ async function doFlash() {
     const chip = await loader.main();
     flashLog("connected: " + chip);
     st("Writing firmware… keep the board plugged in.");
-    // compress:false — esptool-js compressed writes (FLASH_DEFL_DATA) desync over
-    // USB-CDC partway through ("failed to write compressed data after seq N").
-    // Uncompressed is a bit more data but far more reliable on the S2.
     await loader.writeFlash({
       fileArray, flashSize: "keep", flashMode: "keep", flashFreq: "keep",
-      eraseAll: false, compress: false,
-      reportProgress: (i, w, t) => setFlashProgress(t ? w / t : 0),
+      eraseAll: false, compress: true,
+      reportProgress: (i, w) => setFlashProgress(total ? (bases[i] + w) / total : 0),
     });
     setFlashProgress(1);
     st("Done.");
