@@ -1134,9 +1134,12 @@ async function doFlash() {
     const chip = await loader.main();
     flashLog("connected: " + chip);
     st("Writing firmware… keep the board plugged in.");
+    // compress:false — esptool-js compressed writes (FLASH_DEFL_DATA) desync over
+    // USB-CDC partway through ("failed to write compressed data after seq N").
+    // Uncompressed is a bit more data but far more reliable on the S2.
     await loader.writeFlash({
       fileArray, flashSize: "keep", flashMode: "keep", flashFreq: "keep",
-      eraseAll: false, compress: true,
+      eraseAll: false, compress: false,
       reportProgress: (i, w, t) => setFlashProgress(t ? w / t : 0),
     });
     setFlashProgress(1);
