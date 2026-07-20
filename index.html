@@ -291,16 +291,46 @@
   .flash-result h4 { margin: 0 0 3px; font-size: 15px; color: var(--ink); }
   .flash-result p { margin: 0; color: var(--muted); font-size: 13px; }
 
-  /* ---- open-network traffic feed ---- */
-  .traffic-feed { max-height: 262px; overflow-y: auto; margin-top: 10px; display: flex; flex-direction: column; gap: 3px; font-family: var(--mono); font-size: 12px; }
-  .tr-row { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: var(--r-sm); background: var(--elev); }
-  .tr-kind { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 4px; flex: none; letter-spacing: .04em; }
+  /* ---- view tabs ---- */
+  .tabs { max-width: 1160px; margin: 0 auto; padding: 14px 18px 0; display: flex; gap: 4px; }
+  .tab { background: transparent; border: 1px solid transparent; border-bottom: none; color: var(--muted);
+    border-radius: var(--r-sm) var(--r-sm) 0 0; padding: 9px 16px; font-size: 13px; font-weight: 600;
+    display: inline-flex; align-items: center; gap: 8px; cursor: pointer; position: relative; }
+  .tab:hover { color: var(--ink); }
+  .tab.on { color: var(--ink); background: var(--panel); border-color: var(--line); }
+  .tab .icon { width: 15px; height: 15px; }
+  .tab-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--capture); display: inline-block; }
+  #tabTraffic { max-width: 1160px; margin: 0 auto; padding: 18px; display: grid; gap: 14px; }
+
+  /* ---- traffic dashboard ---- */
+  .traf-bar { display: flex; align-items: center; gap: 12px; }
+  .traf-target { font-family: var(--mono); font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .traf-target b { color: var(--accent-ink); }
+  .traf-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 720px) { .traf-grid { grid-template-columns: 1fr; } }
+  .top-list { display: flex; flex-direction: column; gap: 2px; max-height: 300px; overflow-y: auto; font-family: var(--mono); font-size: 12.5px; }
+  .top-row { display: flex; align-items: center; gap: 10px; padding: 5px 8px; border-radius: var(--r-sm); }
+  .top-row:nth-child(odd) { background: var(--elev); }
+  .top-row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
+  .top-row .cnt { color: var(--capture); font-variant-numeric: tabular-nums; flex: none; }
+
+  .pkt-wrap { max-height: 440px; overflow: auto; border-radius: var(--r-sm); }
+  .pkt-table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 12px; }
+  .pkt-table thead th { position: sticky; top: 0; background: var(--panel); color: var(--muted); text-align: left;
+    font-weight: 600; padding: 7px 10px; border-bottom: 1px solid var(--line); font-size: 11px; z-index: 1; }
+  .pkt-table td { padding: 5px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  .pkt-table td.host { white-space: normal; word-break: break-all; color: var(--ink); }
+  .pkt-table td.detail { color: var(--muted); max-width: 340px; overflow: hidden; text-overflow: ellipsis; }
+  .pkt-table .pkt-empty td { color: var(--faint); text-align: center; padding: 18px; }
+  .pkt-table tbody tr:hover { background: var(--elev); }
+  .tr-kind { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 4px; letter-spacing: .04em; }
   .tr-kind.dns { color: var(--sta); border: 1px solid color-mix(in srgb, var(--sta) 45%, var(--line)); }
   .tr-kind.http { color: var(--warn); border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--line)); }
   .tr-kind.tls { color: var(--accent-ink); border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line)); }
-  .tr-host { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
-  .tr-host .path { color: var(--muted); }
-  .tr-src { color: var(--faint); font-size: 11px; flex: none; }
+  .time { color: var(--faint); }
+
+  .page-foot { max-width: 1160px; margin: 6px auto 26px; padding: 0 18px; text-align: center;
+    font-family: var(--voice, Georgia, serif); font-style: italic; font-size: 13px; color: var(--faint); }
 
   /* ---- boot splash (Flipper-style opening) ---- */
   #boot { position: fixed; inset: 0; z-index: 9999; background: var(--bg);
@@ -386,7 +416,19 @@
 <!-- polite announcer for screen readers: state + captures only, not the raw stream -->
 <div class="visually-hidden" role="status" aria-live="polite" id="sr"></div>
 
-<main>
+<nav class="tabs" role="tablist" aria-label="Views">
+  <button class="tab on" id="tabBtnAttack" role="tab" aria-selected="true">
+    <svg class="icon" viewBox="0 0 24 24"><path d="M12 2v6M12 16v6M2 12h6M16 12h6"/><circle cx="12" cy="12" r="3"/></svg>
+    Attack
+  </button>
+  <button class="tab" id="tabBtnTraffic" role="tab" aria-selected="false">
+    <svg class="icon" viewBox="0 0 24 24"><path d="M3 12h4l2 6 4-14 2 8h6"/></svg>
+    Traffic
+    <span class="tab-dot" id="tabTrafDot" hidden aria-hidden="true"></span>
+  </button>
+</nav>
+
+<main id="tabAttack">
   <p class="note" id="support"></p>
 
   <section class="cards">
@@ -497,24 +539,6 @@
           <p class="note" style="margin-top:10px">Streams the selected target's frames over USB and assembles a Wireshark / <code>hcxpcapngtool</code> .pcap in the browser (LINKTYPE_IEEE802_11). Passive capture — no arming. Use USB, not the Flipper UART.</p>
         </div>
       </section>
-
-      <section class="panel">
-        <h2>
-          <svg class="icon" viewBox="0 0 24 24"><path d="M3 12h4l2 6 4-14 2 8h6"/></svg>
-          Open-network traffic
-        </h2>
-        <div class="panel-body">
-          <div style="display:flex; gap:8px">
-            <button id="trafficBtn" class="ghost" style="flex:1; justify-content:center" disabled>
-              <svg class="icon" viewBox="0 0 24 24"><path d="M2 12a10 10 0 0 1 20 0M6 12a6 6 0 0 1 12 0"/><circle cx="12" cy="12" r="1.6"/></svg>
-              <span id="trafficLabel">Start traffic</span>
-            </button>
-            <button id="trafficClear" class="ghost" style="justify-content:center">Clear</button>
-          </div>
-          <div id="trafficFeed" class="traffic-feed"><div class="empty" style="padding:10px 0">No traffic yet — select an open target and start.</div></div>
-          <p class="note" style="margin-top:10px">Passive read of a selected <b>open</b> network's cleartext: DNS lookups, HTTP host/path, and HTTPS <b>SNI</b>. Encrypted networks show nothing. Your own / authorized networks only.</p>
-        </div>
-      </section>
     </div>
   </div>
 
@@ -533,6 +557,50 @@
     <div id="log" role="log" aria-label="Raw device feed"></div>
   </section>
 </main>
+
+<main id="tabTraffic" hidden>
+  <div class="traf-bar">
+    <div class="traf-target" id="trafTarget">No open target selected — pick one in the Attack tab.</div>
+    <div class="spacer"></div>
+    <button id="trafStart" class="ghost" disabled>
+      <svg class="icon" viewBox="0 0 24 24"><path d="M6 4l14 8-14 8V4z"/></svg>
+      <span id="trafStartLabel">Start capture</span>
+    </button>
+    <button id="trafClear" class="ghost">Clear</button>
+  </div>
+
+  <section class="cards">
+    <div class="card"><div class="label">Packets / sec</div><div class="value" id="tPps">0</div></div>
+    <div class="card"><div class="label">Data frames</div><div class="value" id="tFrames">0</div></div>
+    <div class="card"><div class="label">Cleartext hits</div><div class="value capture" id="tHits">0</div></div>
+    <div class="card"><div class="label">Domains</div><div class="value" id="tDomains">0</div></div>
+    <div class="card"><div class="label">Clients</div><div class="value" id="tClients">0</div></div>
+  </section>
+  <div class="note" id="tDiag" style="margin:2px 2px 0">Idle — start a capture on an open target.</div>
+
+  <div class="traf-grid">
+    <section class="panel">
+      <h2><svg class="icon" viewBox="0 0 24 24"><path d="M4 19V5M4 19h16M8 16v-5M12 16V7M16 16v-8"/></svg> Top sites</h2>
+      <div class="panel-body"><div id="tTop" class="top-list"><div class="empty">No sites yet.</div></div></div>
+    </section>
+    <section class="panel">
+      <h2><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg> Clients</h2>
+      <div class="panel-body"><div id="tClientList" class="top-list"><div class="empty">No clients yet.</div></div></div>
+    </section>
+  </div>
+
+  <section class="panel">
+    <h2><svg class="icon" viewBox="0 0 24 24"><path d="M3 12h4l2 6 4-14 2 8h6"/></svg> Live traffic</h2>
+    <div class="pkt-wrap">
+      <table class="pkt-table">
+        <thead><tr><th>Time</th><th>Client</th><th>Type</th><th>Host / domain</th><th>Detail</th></tr></thead>
+        <tbody id="tFeed"><tr class="pkt-empty"><td colspan="5">No packets captured yet.</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<footer class="page-foot">This is why you always encrypt networks.</footer>
 
 <!-- Arm confirmation modal (Gate 1 mirror) -->
 <div class="scrim" id="armScrim" hidden>
@@ -737,6 +805,7 @@ function refreshGates() {
   });
   $("autoBtn").disabled = !ready && !autoRunning;
   $("attackHint").style.display = ready ? "none" : "flex";
+  $("trafStart").disabled = !(port && target);   // recon: needs a target, no arming
 }
 
 /* ---------- target selection ---------- */
@@ -751,6 +820,7 @@ function setTarget(t) {
     <div class="kv"><span class="k">Clients</span><span class="v" id="clientCount">0</span></div>
     <div id="clientList" class="client-list"></div>`;
   send({ t: "target", bssid: t.bssid, c: t.ch || 0 });
+  $("trafTarget").innerHTML = `Target: <b>${esc(t.ssid || t.bssid)}</b> · ch ${t.ch || "?"} — ${esc(t.enc || "")}`;
   refreshGates();
   markSelectedRow();
   announce("Target set to " + (t.ssid || t.bssid));
@@ -789,7 +859,7 @@ function renderWifi(msg) {
     const sel = target && a.b === target.bssid;
     const sv = surveyClients[a.b];
     const cliBadge = sv && sv.clients > 0 ? `<span class="cli-badge">${sv.clients} client${sv.clients > 1 ? "s" : ""}</span>` : "";
-    return `<tr tabindex="0" role="button" data-bssid="${esc(a.b)}" data-ssid="${esc(a.s)}" data-ch="${a.c}" aria-selected="${sel ? "true" : "false"}">
+    return `<tr tabindex="0" role="button" data-bssid="${esc(a.b)}" data-ssid="${esc(a.s)}" data-ch="${a.c}" data-enc="${esc(a.e || "")}" aria-selected="${sel ? "true" : "false"}">
       <td>${esc(a.s || "<hidden>")} ${sel ? '<span class="tgt-flag">◈ target</span>' : ""}${cliBadge}</td>
       <td class="num">${a.r} dBm</td>
       <td class="num">${a.c}</td>
@@ -802,7 +872,7 @@ function renderWifi(msg) {
     : `<div class="empty">No access points in the last scan.</div>`;
 
   $("tableWrap").querySelectorAll("tbody tr").forEach(tr => {
-    const pick = () => setTarget({ bssid: tr.dataset.bssid, ssid: tr.dataset.ssid === "<hidden>" ? "" : tr.dataset.ssid, ch: +tr.dataset.ch });
+    const pick = () => setTarget({ bssid: tr.dataset.bssid, ssid: tr.dataset.ssid === "<hidden>" ? "" : tr.dataset.ssid, ch: +tr.dataset.ch, enc: tr.dataset.enc });
     tr.addEventListener("click", pick);
     tr.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } });
   });
@@ -912,31 +982,87 @@ function togglePcap() {
   $("pcapBtn").style.flex = "1"; $("pcapBtn").style.justifyContent = "center";
 }
 
-/* ---------- open-network traffic viewer ---------- */
-let trafficOn = false;
+/* ---------- open-network traffic viewer (Traffic tab) ---------- */
+let trafficOn = false, activeTab = "attack";
+const trafDomains = new Map();   // host  -> { host, count }
+const trafClients = new Map();   // mac   -> { mac, ip, name, count }
+const trafNames = new Map();     // mac   -> hostname (from DHCP)
+
 function toggleTraffic() {
+  if (!port) return;
   trafficOn = !trafficOn;
   send({ t: "traffic", on: trafficOn });
-  $("trafficLabel").textContent = trafficOn ? "Stop traffic" : "Start traffic";
-  $("trafficBtn").className = trafficOn ? "danger-outline" : "ghost";
-  $("trafficBtn").style.flex = "1"; $("trafficBtn").style.justifyContent = "center";
+  $("trafStartLabel").textContent = trafficOn ? "Stop capture" : "Start capture";
+  $("trafStart").className = trafficOn ? "danger-outline" : "ghost";
+  if (trafficOn) $("tDiag").textContent = "Capturing…";
 }
 function clearTraffic() {
-  $("trafficFeed").innerHTML = '<div class="empty" style="padding:10px 0">No traffic yet — select an open target and start.</div>';
+  trafDomains.clear(); trafClients.clear();
+  $("tFeed").innerHTML = '<tr class="pkt-empty"><td colspan="5">No packets captured yet.</td></tr>';
+  renderTop(); renderClients();
+  ["tPps", "tFrames", "tHits", "tDomains", "tClients"].forEach(id => $(id).textContent = "0");
+}
+function clientName(mac, ip) { return trafNames.get(mac) || ip || mac || "?"; }
+function renderTop() {
+  const el = $("tTop"), a = [...trafDomains.values()].sort((x, y) => y.count - x.count).slice(0, 14);
+  el.innerHTML = a.length ? a.map(x => `<div class="top-row"><span class="name">${esc(x.host)}</span><span class="cnt">${x.count}</span></div>`).join("") : '<div class="empty">No sites yet.</div>';
+}
+function renderClients() {
+  const el = $("tClientList"), a = [...trafClients.values()].sort((x, y) => y.count - x.count).slice(0, 20);
+  el.innerHTML = a.length ? a.map(x => `<div class="top-row"><span class="name" title="${esc(x.mac || "")}">${esc(x.name)}</span><span class="cnt">${x.count}</span></div>`).join("") : '<div class="empty">No clients yet.</div>';
+}
+function trafStat(o) {
+  $("tPps").textContent = o.pps ?? 0;
+  $("tFrames").textContent = o.frames ?? 0;
+  $("tHits").textContent = o.hits ?? 0;
+  const f = o.frames || 0, ip = o.ip || 0, h = o.hits || 0;
+  let m;
+  if (!trafficOn) m = "Idle — start a capture on an open target.";
+  else if (!f) m = `No data frames on ch ${o.ch}. Is a device connected to this AP and actually browsing? Is this the AP's real channel?`;
+  else if (!ip) m = `${f} data frames but 0 cleartext IPv4 — this network is almost certainly encrypted. Only OPEN networks are readable.`;
+  else if (!h) m = `${ip} IPv4 packets seen — browse something on a connected device to surface DNS/HTTP/TLS.`;
+  else m = `${f} frames · ${ip} IPv4 · ${h} readable · channel ${o.ch}`;
+  $("tDiag").textContent = m;
 }
 function addTraffic(o) {
-  const feed = $("trafficFeed");
-  const empty = feed.querySelector(".empty"); if (empty) empty.remove();
-  const kind = (o.kind || "").toLowerCase();
-  const path = o.info ? ` <span class="path">${esc(o.info)}</span>` : "";
-  const row = document.createElement("div");
-  row.className = "tr-row";
-  row.innerHTML = `<span class="tr-kind ${esc(kind)}">${esc(kind.toUpperCase())}</span>`
-    + `<span class="tr-host">${esc(o.host || "")}${path}</span>`
-    + `<span class="tr-src" title="client ${esc(o.mac || "")}">${esc(o.ip || "")}</span>`;
-  feed.appendChild(row);
-  while (feed.children.length > 250) feed.removeChild(feed.firstChild);
-  feed.scrollTop = feed.scrollHeight;
+  if (o.kind === "stat") { trafStat(o); return; }
+  if (o.kind === "client") {                    // DHCP hostname -> real device name
+    if (o.mac && o.name) {
+      trafNames.set(o.mac, o.name);
+      const c = trafClients.get(o.mac); if (c) { c.name = o.name; renderClients(); }
+    }
+    return;
+  }
+  const kind = (o.kind || "").toLowerCase(), host = o.host || "";
+  if (host) {
+    const d = trafDomains.get(host) || { host, count: 0 }; d.count++; trafDomains.set(host, d);
+    renderTop(); $("tDomains").textContent = trafDomains.size;
+  }
+  if (o.mac) {
+    const c = trafClients.get(o.mac) || { mac: o.mac, ip: o.ip, count: 0, name: "" };
+    c.count++; if (o.ip) c.ip = o.ip; c.name = clientName(o.mac, c.ip); trafClients.set(o.mac, c);
+    renderClients(); $("tClients").textContent = trafClients.size;
+  }
+  const feed = $("tFeed"), empty = feed.querySelector(".pkt-empty"); if (empty) empty.remove();
+  const tr = document.createElement("tr");
+  tr.innerHTML = `<td class="time">${new Date().toLocaleTimeString()}</td>`
+    + `<td>${esc(clientName(o.mac, o.ip))}</td>`
+    + `<td><span class="tr-kind ${esc(kind)}">${esc(kind.toUpperCase())}</span></td>`
+    + `<td class="host">${esc(host)}</td>`
+    + `<td class="detail" title="${esc(o.info || "")}">${esc(o.info || "")}</td>`;
+  feed.insertBefore(tr, feed.firstChild);
+  while (feed.children.length > 400) feed.removeChild(feed.lastChild);
+  if (activeTab !== "traffic") $("tabTrafDot").hidden = false;
+}
+function showTab(name) {
+  activeTab = name;
+  $("tabAttack").hidden = name !== "attack";
+  $("tabTraffic").hidden = name !== "traffic";
+  $("tabBtnAttack").classList.toggle("on", name === "attack");
+  $("tabBtnAttack").setAttribute("aria-selected", name === "attack");
+  $("tabBtnTraffic").classList.toggle("on", name === "traffic");
+  $("tabBtnTraffic").setAttribute("aria-selected", name === "traffic");
+  if (name === "traffic") $("tabTrafDot").hidden = true;
 }
 function setAutoBtn() {
   $("autoLabel").textContent = autoRunning ? "Stop auto chain" : "Run auto chain";
@@ -977,7 +1103,6 @@ async function connect() {
     $("connectBtn").disabled = true; $("disconnectBtn").disabled = false;
     $("consolePanel").classList.remove("hidden-pre");
     $("pcapBtn").disabled = false;
-    $("trafficBtn").disabled = false;
     refreshGates();
     readLoop();
     await send({ t: "ping" });
@@ -993,8 +1118,7 @@ async function disconnect() {
   $("connectBtn").disabled = false; $("disconnectBtn").disabled = true;
   if (pcapOn) { pcapOn = false; $("pcapLabel").textContent = "Start PCAP"; $("pcapBtn").className = "ghost"; }
   $("pcapBtn").disabled = true;
-  if (trafficOn) { trafficOn = false; $("trafficLabel").textContent = "Start traffic"; $("trafficBtn").className = "ghost"; }
-  $("trafficBtn").disabled = true;
+  if (trafficOn) { trafficOn = false; $("trafStartLabel").textContent = "Start capture"; $("trafStart").className = "ghost"; }
   refreshGates();
 }
 
@@ -1054,8 +1178,10 @@ $("pauseBtn").addEventListener("click", () => {
 });
 $("clearBtn").addEventListener("click", () => { $("log").innerHTML = ""; rxCount = 0; $("rxCount").textContent = 0; });
 $("pcapBtn").addEventListener("click", togglePcap);
-$("trafficBtn").addEventListener("click", toggleTraffic);
-$("trafficClear").addEventListener("click", clearTraffic);
+$("trafStart").addEventListener("click", toggleTraffic);
+$("trafClear").addEventListener("click", clearTraffic);
+$("tabBtnAttack").addEventListener("click", () => showTab("attack"));
+$("tabBtnTraffic").addEventListener("click", () => showTab("traffic"));
 $("pcapDl").addEventListener("click", downloadPcap);
 
 /* ---------- firmware flasher (Web Serial / esptool-js) ---------- */
