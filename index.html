@@ -164,6 +164,24 @@
   }
   .field input:focus-visible { outline: 2px solid var(--tx); outline-offset: 1px; }
 
+  /* ---- evil twin panel ---- */
+  .twin-panel { border-color: color-mix(in srgb, var(--danger) 30%, var(--line)); }
+  .twin-panel > h2 { color: var(--danger-ink); }
+  .twin-panel > h2 .icon { color: var(--danger); }
+  .twin-fields { display: grid; gap: 9px; margin-bottom: 11px; }
+  .twin-fields .field { margin-bottom: 0; }
+  .twin-fields label { min-width: 68px; }
+  .twin-fields input[type=text], .twin-fields input[type=password] {
+    flex: 1; min-width: 0; font-family: var(--mono); font-size: 13px; padding: 7px 9px; min-height: 34px;
+    background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 6px;
+  }
+  .twin-fields input:focus-visible { outline: 2px solid var(--tx); outline-offset: 1px; }
+  .twin-fwd { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); cursor: pointer; }
+  .twin-fwd input { width: 16px; height: 16px; accent-color: var(--danger); flex: none; }
+  .twin-status { font-family: var(--mono); font-size: 12px; color: var(--muted); margin-top: 10px; min-height: 16px; }
+  .twin-status.live { color: var(--danger-ink); }
+  .twin-status b { color: var(--capture); }
+
   /* ---- console ---- */
   .console { border-color: color-mix(in srgb, var(--tx) 20%, var(--line)); }
   .console-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 9px 12px; border-bottom: 1px solid var(--line); background: var(--elev); }
@@ -300,7 +318,38 @@
   .tab.on { color: var(--ink); background: var(--panel); border-color: var(--line); }
   .tab .icon { width: 15px; height: 15px; }
   .tab-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--capture); display: inline-block; }
+  .tab-dot[hidden] { display: none; }  /* the class's display would otherwise beat [hidden] at equal specificity */
   #tabTraffic { max-width: 1160px; margin: 0 auto; padding: 18px; display: grid; gap: 14px; }
+  /* ---- serial shell (Console tab) ---- */
+  #shellPanel { display: flex; flex-direction: column; }
+  .shell-title { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
+  .shell-mute { font-size: 12px; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+  .shell-mute input { width: 15px; height: 15px; accent-color: var(--tx); }
+  #shellOut {
+    font-family: var(--mono); font-size: 12px; line-height: 1.55; margin: 0;
+    height: calc(100vh - 330px); min-height: 280px; overflow-y: auto; overflow-x: hidden;
+    padding: 10px 14px; background: #14110b; scroll-behavior: smooth; overscroll-behavior: contain;
+  }
+  @media (prefers-color-scheme: light) { #shellOut { background: #211c13; color: #ece3d5; } }
+  .shell-ln { display: flex; gap: 9px; padding: 1px 0; white-space: pre-wrap; word-break: break-word; }
+  .shell-ln .t0 { color: var(--faint); flex: none; font-variant-numeric: tabular-nums; }
+  .shell-ln.tx  .m { color: var(--tx); font-weight: 600; }
+  .shell-ln.rx  .m { color: var(--muted); }
+  .shell-ln.err .m { color: var(--danger-ink); }
+  .shell-ln.sys .m { color: var(--accent-ink); }
+  .shell-input { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-top: 1px solid var(--line); background: var(--elev); }
+  .shell-prompt { font-family: var(--mono); color: var(--accent-ink); font-weight: 700; flex: none; font-size: 15px; }
+  .shell-input input {
+    flex: 1; min-width: 0; font-family: var(--mono); font-size: 13px; padding: 8px 10px; min-height: 38px;
+    background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 6px;
+  }
+  .shell-input input:focus-visible { outline: 2px solid var(--tx); outline-offset: 1px; }
+  .shell-input input:disabled { opacity: .5; }
+  /* The `hidden` attribute's display:none comes from the UA sheet, which author rules
+     (main{display:grid}, #tabTraffic{display:grid}) override — so the tabs never hid
+     anything and every view stacked on one long page. Re-assert hiding at author level
+     with ID+attr specificity so it beats those display rules. */
+  #tabAttack[hidden], #tabTraffic[hidden], #tabConsole[hidden] { display: none; }
 
   /* ---- traffic dashboard ---- */
   .traf-bar { display: flex; align-items: center; gap: 12px; }
@@ -426,6 +475,10 @@
     Traffic
     <span class="tab-dot" id="tabTrafDot" hidden aria-hidden="true"></span>
   </button>
+  <button class="tab" id="tabBtnConsole" role="tab" aria-selected="false">
+    <svg class="icon" viewBox="0 0 24 24"><path d="M4 5h16v14H4z"/><path d="M8 10l3 2-3 2M13 14h4"/></svg>
+    Console
+  </button>
 </nav>
 
 <main id="tabAttack">
@@ -539,6 +592,37 @@
           <p class="note" style="margin-top:10px">Streams the selected target's frames over USB and assembles a Wireshark / <code>hcxpcapngtool</code> .pcap in the browser (LINKTYPE_IEEE802_11). Passive capture — no arming. Use USB, not the Flipper UART.</p>
         </div>
       </section>
+
+      <section class="panel twin-panel">
+        <h2>
+          <svg class="icon" viewBox="0 0 24 24"><path d="M12 3v18M5 8h14M7 8a5 5 0 0 0 10 0M7 8a5 5 0 0 1 10 0"/><circle cx="12" cy="8" r="1"/></svg>
+          Evil twin — MITM
+        </h2>
+        <div class="panel-body">
+          <div class="twin-fields">
+            <div class="field" id="twinPskRow">
+              <label for="twinPsk">Real PSK</label>
+              <input type="password" id="twinPsk" autocomplete="off" spellcheck="false"
+                     placeholder="target passphrase — you're authorized">
+            </div>
+            <div class="field">
+              <label for="twinDns">DNS spoof</label>
+              <input type="text" id="twinDns" autocomplete="off" spellcheck="false" inputmode="decimal"
+                     placeholder="optional redirect IP (blank = sinkhole to us)">
+            </div>
+            <label class="twin-fwd"><input type="checkbox" id="twinForward"> Forward — give the victim real internet (experimental; pauses the jam)</label>
+          </div>
+          <button id="twinBtn" class="danger" style="width:100%; justify-content:center" disabled>
+            <svg class="icon" viewBox="0 0 24 24"><path d="M12 3v18M5 8h14M7 8a5 5 0 0 0 10 0"/></svg>
+            <span id="twinLabel">Launch twin</span>
+          </button>
+          <div id="twinStatus" class="twin-status"></div>
+          <p class="hint">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+            <span>Clones the target's SSID (distinct BSSID) + sustained deauth to roam its clients onto us, then reads their DNS/traffic. Impersonation — authorized single-target tests only. No login page, no credential capture. WPA2 targets need the real PSK so clients can join.</span>
+          </p>
+        </div>
+      </section>
     </div>
   </div>
 
@@ -600,6 +684,26 @@
   </section>
 </main>
 
+<main id="tabConsole" hidden>
+  <section class="panel console" id="shellPanel">
+    <div class="console-tools">
+      <span class="shell-title">Serial shell → ESP32</span>
+      <div class="spacer"></div>
+      <label class="shell-mute"><input type="checkbox" id="shellMute" checked> hide heartbeat</label>
+      <button class="ghost mini" id="shellHelpBtn">Commands</button>
+      <button class="ghost mini" id="shellClear">Clear</button>
+    </div>
+    <div id="shellOut" role="log" aria-label="Serial shell output"></div>
+    <form id="shellForm" class="shell-input" autocomplete="off">
+      <span class="shell-prompt" aria-hidden="true">›</span>
+      <input id="shellInput" type="text" spellcheck="false" autocapitalize="off" autocorrect="off"
+             placeholder='connect a device, then type a command — e.g. scan · chan 6 · {"t":"ping"} · help'
+             aria-label="Command to send to the ESP32" disabled>
+      <button type="submit" id="shellSend" disabled>Send</button>
+    </form>
+  </section>
+</main>
+
 <footer class="page-foot">This is why you always encrypt networks.</footer>
 
 <!-- Arm confirmation modal (Gate 1 mirror) -->
@@ -624,6 +728,32 @@
     <div class="actions">
       <button class="ghost" id="armCancel">Cancel</button>
       <button class="danger" id="armConfirm" disabled>Arm device</button>
+    </div>
+  </div>
+</div>
+
+<!-- Evil-twin confirmation modal (impersonation + sustained jam) -->
+<div class="scrim" id="twinScrim" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="twinTitle" aria-describedby="twinDesc">
+    <h3 id="twinTitle">
+      <svg class="icon" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+      Launch evil twin
+    </h3>
+    <div class="body">
+      <p id="twinDesc" style="margin-top:0">This <b>impersonates</b> <span id="twinTargetName">the target</span> and runs a <b>sustained deauth</b> of the real AP to pull its clients onto your rogue AP, then reads their traffic.</p>
+      <div class="warn-box">
+        Impersonating an access point and jamming another are illegal except on
+        networks you own or are explicitly authorized to test. This is a real MITM
+        against real user devices. Single target only. No credential capture.
+      </div>
+      <label class="confirm-check">
+        <input type="checkbox" id="twinAck">
+        <span>I am authorized to run a rogue AP and jam this specific network, and accept responsibility.</span>
+      </label>
+    </div>
+    <div class="actions">
+      <button class="ghost" id="twinCancel">Cancel</button>
+      <button class="danger" id="twinConfirm" disabled>Launch twin</button>
     </div>
   </div>
 </div>
@@ -794,6 +924,7 @@ function setArmed(a) {
   $("armBtnLabel").textContent = a ? "Disarm" : "Arm";
   $("armBtn").className = a ? "danger" : "danger-outline";
   $("armBtn").style.flex = "1"; $("armBtn").style.justifyContent = "center";
+  if (!a) twinReset();   // disarm tears down the twin on-device — mirror it here
   refreshGates();
 }
 function refreshGates() {
@@ -806,6 +937,7 @@ function refreshGates() {
   $("autoBtn").disabled = !ready && !autoRunning;
   $("attackHint").style.display = ready ? "none" : "flex";
   $("trafStart").disabled = !(port && target);   // recon: needs a target, no arming
+  setTwinBtn(); twinRow();                        // twin: needs arm + target (gated)
 }
 
 /* ---------- target selection ---------- */
@@ -903,7 +1035,11 @@ function handleMessage(o) {
         announce("WPS Pixie inputs captured for " + (o.ssid || o.bssid));
       } else logLine(o.m || "wps", "info");
       break;
-    case "ack": logLine(`${o.c}: ${o.m}`, o.ok ? "ackok" : "ackno"); break;
+    case "ack":
+      logLine(`${o.c}: ${o.m}`, o.ok ? "ackok" : "ackno");
+      if (o.c === "twin" && o.ok && /stopped/.test(o.m || "")) twinReset();
+      break;
+    case "twin": handleTwin(o); break;
     case "sta": logLine(`station ${o.mac} ${o.r ? "(" + o.r + " dBm)" : ""}`, "sta"); break;
     case "client":
       if (target && o.bssid === target.bssid) addClient(o.mac);
@@ -1056,17 +1192,157 @@ function addTraffic(o) {
 }
 function showTab(name) {
   activeTab = name;
-  $("tabAttack").hidden = name !== "attack";
-  $("tabTraffic").hidden = name !== "traffic";
-  $("tabBtnAttack").classList.toggle("on", name === "attack");
-  $("tabBtnAttack").setAttribute("aria-selected", name === "attack");
-  $("tabBtnTraffic").classList.toggle("on", name === "traffic");
-  $("tabBtnTraffic").setAttribute("aria-selected", name === "traffic");
+  for (const t of ["attack", "traffic", "console"]) {
+    const cap = t[0].toUpperCase() + t.slice(1);
+    $("tab" + cap).hidden = name !== t;
+    $("tabBtn" + cap).classList.toggle("on", name === t);
+    $("tabBtn" + cap).setAttribute("aria-selected", name === t);
+  }
   if (name === "traffic") $("tabTrafDot").hidden = true;
+  if (name === "console" && !$("shellInput").disabled) setTimeout(() => $("shellInput").focus(), 0);
 }
 function setAutoBtn() {
   $("autoLabel").textContent = autoRunning ? "Stop auto chain" : "Run auto chain";
   $("autoBtn").disabled = autoRunning ? false : !(armed && target);
+}
+
+/* ---------- serial shell (Console tab) ---------- */
+// A raw REPL onto the ESP32: type an OWP command (friendly shorthand OR verbatim
+// JSON) and it goes out over the same serial link; every line the device sends
+// back is echoed here. It sends exactly what the buttons send — same two on-device
+// gates apply (arm + repeat-the-target BSSID); the shell can't bypass them.
+let shellHist = [], shellHistIdx = 0, shellMuted = true, shellReady = false;
+const MAC_RE = /^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/;
+
+function shellEcho(text, kind) {
+  const el = $("shellOut"); if (!el) return;
+  const div = document.createElement("div");
+  div.className = "shell-ln " + (kind || "rx");
+  div.innerHTML = `<span class="t0">${now()}</span><span class="m">${esc(text)}</span>`;
+  el.appendChild(div);
+  while (el.childElementCount > 500) el.removeChild(el.firstChild);
+  el.scrollTop = el.scrollHeight;
+}
+function shellEchoRx(line) {
+  if (shellMuted && /"t":"(pong|wifi)"/.test(line)) return;   // drop heartbeat noise
+  shellEcho(line, "rx");
+}
+function onoff(v) {
+  if (v === undefined) return true;
+  if (/^(on|1|true|yes)$/i.test(v)) return true;
+  if (/^(off|0|false|no)$/i.test(v)) return false;
+  return null;
+}
+// Map a typed line to an OWP object. Returns {obj} | {error} | {help} | {clear} | null.
+function parseShellCommand(raw) {
+  const s = raw.trim();
+  if (!s) return null;
+  if (s === "help" || s === "?") return { help: true };
+  if (s === "clear" || s === "cls") return { clear: true };
+  if (s[0] === "{") { try { return { obj: JSON.parse(s) }; } catch (e) { return { error: "invalid JSON: " + e.message }; } }
+  const p = s.split(/\s+/), cmd = p[0].toLowerCase();
+  switch (cmd) {
+    case "ping": return { obj: { t: "ping" } };
+    case "scan": return { obj: { t: "scan" } };
+    case "sta": case "stations": return { obj: { t: "stations" } };
+    case "disarm": return { obj: { t: "disarm" } };
+    case "crack": return { obj: { t: "crack" } };
+    case "arm":   // mirror the device gate: bare `arm` is refused; needs the token
+      return (p[1] && p[1].toUpperCase() === "AUTHORIZED")
+        ? { obj: { t: "arm", ack: "AUTHORIZED" } } : { obj: { t: "arm" } };
+    case "chan": { const c = parseInt(p[1], 10);
+      return (c >= 1 && c <= 14) ? { obj: { t: "chan", c } } : { error: "usage: chan <1-14>" }; }
+    case "sniff": case "monitor": case "pcap": case "traffic": {
+      const v = onoff(p[1]); return v === null ? { error: `usage: ${cmd} on|off` } : { obj: { t: cmd, on: v } }; }
+    case "survey":
+      return (p[1] && /^stop$/i.test(p[1])) ? { obj: { t: "survey", stop: true } } : { obj: { t: "survey" } };
+    case "target": { const mac = (p[1] || "").toUpperCase();
+      if (!MAC_RE.test(mac)) return { error: "usage: target <BSSID> [channel]" };
+      return { obj: { t: "target", bssid: mac, c: p[2] ? (parseInt(p[2], 10) || 0) : 0 } }; }
+    case "auto": case "deauth": case "handshake": case "pmkid": case "wps": {
+      if (cmd === "auto" && /^stop$/i.test(p[1] || "")) return { obj: { t: "auto", stop: true } };
+      let mac = (p[1] || "").toUpperCase(), rest = p.slice(2);
+      if (!MAC_RE.test(mac)) {                       // no explicit BSSID -> use the selected target
+        if (!target) return { error: `${cmd} needs a target — select one in Attack, or: ${cmd} <BSSID>` };
+        mac = target.bssid; rest = p.slice(1);
+      }
+      const obj = { t: cmd, bssid: mac };
+      if (cmd === "deauth") { const n = parseInt(rest[0], 10); obj.n = (n >= 1 && n <= 64) ? n : 16; }
+      return { obj };
+    }
+    default: return { error: `unknown command "${cmd}" — type help` };
+  }
+}
+function shellHelp() {
+  [
+    "commands (also accepts verbatim JSON like {\"t\":\"scan\"}):",
+    "  ping · scan · stations · survey [stop] · chan <1-14>",
+    "  sniff|monitor|pcap|traffic on|off",
+    "  target <BSSID> [ch]        select the target (Gate 2)",
+    "  arm AUTHORIZED / disarm    Gate 1 (bare `arm` is refused, like the device)",
+    "  deauth [BSSID] [n] · handshake [BSSID] · pmkid [BSSID] · wps [BSSID]",
+    "  auto [BSSID] · auto stop   run/stop the wifite-style chain",
+    "  (omitting BSSID uses the selected target) · help · clear",
+  ].forEach(l => shellEcho(l, "sys"));
+}
+function shellSubmit(raw) {
+  const parsed = parseShellCommand(raw);
+  if (!parsed) return;
+  if (parsed.help)  return shellHelp();
+  if (parsed.clear) { $("shellOut").innerHTML = ""; return; }
+  if (parsed.error) return shellEcho(parsed.error, "err");
+  shellEcho("› " + raw.trim(), "tx");
+  const js = JSON.stringify(parsed.obj);
+  if (js !== raw.trim()) shellEcho("  → " + js, "sys");   // show shorthand expansion
+  send(parsed.obj);   // same path the buttons use; also mirrored in the Attack feed
+}
+
+/* ---------- evil twin (MITM) ---------- */
+let twinOn = false, twinLastFocus = null;
+
+function targetIsOpen() { return /open/i.test((target && target.enc) || ""); }
+function twinRow() {  // the real-PSK field only matters for encrypted targets
+  $("twinPskRow").style.display = (target && !targetIsOpen()) ? "" : "none";
+}
+function setTwinBtn() {
+  $("twinLabel").textContent = twinOn ? "Stop twin" : "Launch twin";
+  $("twinBtn").className = twinOn ? "danger-outline" : "danger";
+  $("twinBtn").style.width = "100%"; $("twinBtn").style.justifyContent = "center";
+  $("twinBtn").disabled = twinOn ? false : !(armed && target);   // stop anytime; start needs arm+target
+}
+function twinReset() {
+  twinOn = false;
+  const st = $("twinStatus"); st.className = "twin-status"; st.textContent = "";
+  setTwinBtn();
+}
+function openTwin() {
+  if (!(armed && target)) return;
+  twinLastFocus = document.activeElement;
+  $("twinTargetName").textContent = target.ssid || target.bssid;
+  $("twinAck").checked = false; $("twinConfirm").disabled = true;
+  $("twinScrim").hidden = false;
+  $("twinAck").focus();
+}
+function closeTwin() { $("twinScrim").hidden = true; if (twinLastFocus) twinLastFocus.focus(); }
+function launchTwin() {
+  const psk = $("twinPsk").value.trim();
+  if (!targetIsOpen() && psk.length < 8) {
+    $("twinStatus").textContent = "WPA2 target: enter the real 8+ character PSK so clients can join.";
+    return;
+  }
+  const msg = { t: "twin", bssid: target.bssid };
+  if (!targetIsOpen() && psk) msg.psk = psk;
+  const dns = $("twinDns").value.trim(); if (dns) msg.dns = dns;
+  if ($("twinForward").checked) msg.forward = true;
+  send(msg);
+  closeTwin();
+}
+function handleTwin(o) {
+  if (o.kind !== "stat") return;
+  twinOn = true; setTwinBtn();
+  const st = $("twinStatus"); st.className = "twin-status live";
+  st.innerHTML = `twin live · <b>${o.clients ?? 0}</b> client(s) · ${o.open ? "open" : "wpa2"} · ch ${esc(o.ch)}`
+    + (o.forward ? ` · forward ${o.napt ? "on" : "connecting…"}` : "");
 }
 
 /* ---------- read loop ---------- */
@@ -1085,6 +1361,7 @@ async function readLoop() {
         const line = buf.slice(0, nl).trim();
         buf = buf.slice(nl + 1);
         if (!line) continue;
+        shellEchoRx(line);                // raw serial line -> Console shell transcript
         try { handleMessage(JSON.parse(line)); }
         catch { logLine(line, "log"); }   // non-JSON: still show it raw
       }
@@ -1103,6 +1380,8 @@ async function connect() {
     $("connectBtn").disabled = true; $("disconnectBtn").disabled = false;
     $("consolePanel").classList.remove("hidden-pre");
     $("pcapBtn").disabled = false;
+    $("shellInput").disabled = false; $("shellSend").disabled = false;
+    if (!shellReady) { shellEcho("connected — type a command, or `help` for the list.", "sys"); shellReady = true; }
     refreshGates();
     readLoop();
     await send({ t: "ping" });
@@ -1119,6 +1398,9 @@ async function disconnect() {
   if (pcapOn) { pcapOn = false; $("pcapLabel").textContent = "Start PCAP"; $("pcapBtn").className = "ghost"; }
   $("pcapBtn").disabled = true;
   if (trafficOn) { trafficOn = false; $("trafStartLabel").textContent = "Start capture"; $("trafStart").className = "ghost"; }
+  $("shellInput").disabled = true; $("shellSend").disabled = true;
+  shellReady = false;
+  twinReset();
   refreshGates();
 }
 
@@ -1182,6 +1464,36 @@ $("trafStart").addEventListener("click", toggleTraffic);
 $("trafClear").addEventListener("click", clearTraffic);
 $("tabBtnAttack").addEventListener("click", () => showTab("attack"));
 $("tabBtnTraffic").addEventListener("click", () => showTab("traffic"));
+$("tabBtnConsole").addEventListener("click", () => showTab("console"));
+
+$("shellForm").addEventListener("submit", e => {
+  e.preventDefault();
+  const v = $("shellInput").value;
+  if (!v.trim()) return;
+  if (shellHist[shellHist.length - 1] !== v) shellHist.push(v);
+  shellHistIdx = shellHist.length;
+  shellSubmit(v);
+  $("shellInput").value = "";
+});
+$("shellInput").addEventListener("keydown", e => {
+  if (e.key === "ArrowUp") {
+    if (shellHistIdx > 0) { shellHistIdx--; $("shellInput").value = shellHist[shellHistIdx]; e.preventDefault(); }
+  } else if (e.key === "ArrowDown") {
+    if (shellHistIdx < shellHist.length - 1) { shellHistIdx++; $("shellInput").value = shellHist[shellHistIdx]; }
+    else { shellHistIdx = shellHist.length; $("shellInput").value = ""; }
+    e.preventDefault();
+  }
+});
+$("shellClear").addEventListener("click", () => { $("shellOut").innerHTML = ""; });
+$("shellHelpBtn").addEventListener("click", shellHelp);
+$("shellMute").addEventListener("change", e => { shellMuted = e.target.checked; });
+
+$("twinBtn").addEventListener("click", () => { if (twinOn) send({ t: "twin", off: true }); else openTwin(); });
+$("twinAck").addEventListener("change", e => { $("twinConfirm").disabled = !e.target.checked; });
+$("twinCancel").addEventListener("click", closeTwin);
+$("twinConfirm").addEventListener("click", launchTwin);
+$("twinScrim").addEventListener("click", e => { if (e.target === $("twinScrim")) closeTwin(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("twinScrim").hidden) closeTwin(); });
 $("pcapDl").addEventListener("click", downloadPcap);
 
 /* ---------- firmware flasher (Web Serial / esptool-js) ---------- */
