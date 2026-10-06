@@ -349,7 +349,39 @@
      (main{display:grid}, #tabTraffic{display:grid}) override — so the tabs never hid
      anything and every view stacked on one long page. Re-assert hiding at author level
      with ID+attr specificity so it beats those display rules. */
-  #tabAttack[hidden], #tabTraffic[hidden], #tabConsole[hidden] { display: none; }
+  #tabAttack[hidden], #tabTraffic[hidden], #tabConsole[hidden], #tabBle[hidden] { display: none; }
+
+  /* ---------- BLE: address-kind + verdict badges ----------
+     Classification comes directly from NimBLE on the device (isPublic / isRpa /
+     isNrpa / isStatic). Colour the pills so a glance at the table tells you
+     which devices even *can* be anonymous (RPA / NRPA) vs which carry a stable
+     identifier (public / static). */
+  .ble-kind {
+    display: inline-block; padding: 2px 8px; border-radius: 999px;
+    font-size: 11px; font-weight: 600; letter-spacing: 0.2px;
+    border: 1px solid var(--line); background: var(--panel-2, var(--panel));
+  }
+  .ble-kind.public  { color: #ff6b6b; border-color: #ff6b6b55; }
+  .ble-kind.static  { color: #ff9f45; border-color: #ff9f4555; }
+  .ble-kind.rpa     { color: #67d382; border-color: #67d38255; }
+  .ble-kind.nrpa    { color: #67d382; border-color: #67d38255; }
+  .ble-kind.random  { color: var(--muted); }
+
+  /* Audit verdict pill. Matches the verdict strings the firmware emits
+     verbatim; anything unknown falls through to the default (neutral) style. */
+  .ble-verdict {
+    display: inline-block; padding: 4px 10px; border-radius: 6px;
+    font-weight: 700; font-size: 12px; letter-spacing: 0.4px;
+    border: 1px solid var(--line);
+  }
+  .ble-verdict.good      { color: #67d382; border-color: #67d38255; background: #67d3821a; }
+  .ble-verdict.leaky     { color: #ff9f45; border-color: #ff9f4555; background: #ff9f451a; }
+  .ble-verdict.trackable { color: #ff6b6b; border-color: #ff6b6b55; background: #ff6b6b1a; }
+  .ble-verdict.pending   { color: #7fb3ff; border-color: #7fb3ff55; background: #7fb3ff1a; }
+  .ble-verdict.unknown   { color: var(--muted); }
+
+  .ble-audit-detail { color: var(--muted); font-size: 13px; margin-top: 8px; line-height: 1.5; }
+  .ble-mac { font-family: var(--mono); font-size: 12px; }
 
   /* ---- traffic dashboard ---- */
   .traf-bar { display: flex; align-items: center; gap: 12px; }
@@ -474,6 +506,12 @@
     <svg class="icon" viewBox="0 0 24 24"><path d="M3 12h4l2 6 4-14 2 8h6"/></svg>
     Traffic
     <span class="tab-dot" id="tabTrafDot" hidden aria-hidden="true"></span>
+  </button>
+  <!-- BLE tab: only enabled when the connected device advertises the "ble"
+       capability in its hello (classic ESP32 / S3; the S2 is WiFi-only). -->
+  <button class="tab" id="tabBtnBle" role="tab" aria-selected="false" hidden>
+    <svg class="icon" viewBox="0 0 24 24"><path d="M7 7l10 10M7 17L17 7"/><path d="M12 2l5 5-5 5V2zM12 12l5 5-5 5v-10z"/></svg>
+    BLE
   </button>
   <button class="tab" id="tabBtnConsole" role="tab" aria-selected="false">
     <svg class="icon" viewBox="0 0 24 24"><path d="M4 5h16v14H4z"/><path d="M8 10l3 2-3 2M13 14h4"/></svg>
@@ -684,6 +722,121 @@
   </section>
 </main>
 
+<!-- ======================================================================
+     BLE tab — passive recon (un-gated) + privacy audit (gated like deauth).
+     The audit is the whole point: NimBLE classifies every address on-chip, so
+     we can actually tell apart cosmetic BLE "privacy" (RPA that rotates but
+     the manufacturer-data stays identical, so the device is still trackable)
+     from the real thing. The gate is a separate ACK string (PRIVACY_AUDIT),
+     distinct from WiFi's AUTHORIZED, so you can't arm one by mistake with the
+     other.
+====================================================================== -->
+<main id="tabBle" hidden>
+  <p class="note">
+    Classification comes from the BLE stack on-device (<b>public</b> / <b>static</b>
+    = fixed identifier; <b>rpa</b> / <b>nrpa</b> = randomized). Audit a single
+    target to measure whether its payload stays stable across MAC rotations —
+    the signature "LEAKY" verdict in modern tracking research.
+  </p>
+
+  <section class="cards">
+    <div class="card"><div class="label">BLE devices</div><div class="value" id="bleCount">—</div></div>
+    <div class="card"><div class="label">Rotating (RPA)</div><div class="value" id="bleRpaCount">—</div></div>
+    <div class="card"><div class="label">Fixed MAC</div><div class="value" id="bleFixedCount">—</div></div>
+    <div class="card"><div class="label">Audit verdict</div><div class="value" id="bleVerdictCard">—</div></div>
+  </section>
+
+  <div class="cols">
+    <section class="panel">
+      <h2>
+        <svg class="icon" viewBox="0 0 24 24"><path d="M7 7l10 10M7 17L17 7"/><path d="M12 2l5 5-5 5V2zM12 12l5 5-5 5v-10z"/></svg>
+        Devices — tap a row to target
+      </h2>
+      <div style="display:flex; align-items:center; gap:8px; padding:0 15px 10px 15px">
+        <button id="bleScanBtn" class="ghost" style="justify-content:center">
+          <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/></svg>
+          <span id="bleScanLabel">Start scan</span>
+        </button>
+        <span class="note" id="bleScanNote" style="margin:0; font-size:12px">WiFi scan pauses while BLE scan is on.</span>
+      </div>
+      <div id="bleTableWrap"><div class="empty">Start the BLE scan to list nearby devices.</div></div>
+    </section>
+
+    <div class="stack">
+      <section class="panel">
+        <h2>
+          <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+          Target &amp; arming
+        </h2>
+        <div class="panel-body">
+          <div class="target-box" id="bleTargetBox">
+            <div class="empty" style="padding:8px 0">No target selected.</div>
+          </div>
+          <div style="display:flex; gap:8px; margin-top:13px">
+            <button id="bleArmBtn" class="danger-outline" style="flex:1; justify-content:center">
+              <svg class="icon" viewBox="0 0 24 24"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7l8-4z"/></svg>
+              <span id="bleArmBtnLabel">Arm audit</span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>
+          <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg>
+          Privacy audit
+        </h2>
+        <div class="panel-body">
+          <div style="display:flex; gap:8px">
+            <button id="bleAuditBtn" class="danger" style="flex:1; justify-content:center" disabled>
+              <svg class="icon" viewBox="0 0 24 24"><path d="M6 4l14 8-14 8V4z"/></svg>
+              <span id="bleAuditBtnLabel">Start audit</span>
+            </button>
+          </div>
+          <div id="bleAuditView" style="margin-top:12px">
+            <div class="empty" style="padding:8px 0">Arm, pick a target, then start the audit.</div>
+          </div>
+          <p class="note" style="margin-top:10px; font-size:12px">
+            RPAs typically rotate every 10–15 min, so a real verdict takes time.
+            The audit watches for other addresses that share this device's
+            (name, manufacturer-data) fingerprint — those are rotations in the
+            wild. If the payload stays identical across rotations, the device
+            is trackable despite the random MAC.
+          </p>
+        </div>
+      </section>
+    </div>
+  </div>
+</main>
+
+<!-- BLE privacy-audit gate: the ACK string is PRIVACY_AUDIT (not AUTHORIZED)
+     so you cannot arm this by habit from the WiFi arm dialog. -->
+<div class="scrim" id="bleArmScrim" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="bleArmTitle" aria-describedby="bleArmDesc">
+    <h3 id="bleArmTitle">
+      <svg class="icon" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+      Arm BLE privacy audit
+    </h3>
+    <div class="body">
+      <p id="bleArmDesc" style="margin-top:0">Arming lets Orthanc record identifiers advertised by the selected device over time and correlate address rotations against its payload.</p>
+      <div class="warn-box">
+        Sustained BLE monitoring records device identifiers. Only run this
+        against devices you own or have explicit permission to audit — e.g.
+        your own phone, your own tracker, or hardware you are formally
+        reviewing.
+      </div>
+      <label class="confirm-check">
+        <input type="checkbox" id="bleArmAck">
+        <span>I am authorized to monitor this device and understand the output may contain identifiers.</span>
+      </label>
+    </div>
+    <div class="actions">
+      <button class="ghost" id="bleArmCancel">Cancel</button>
+      <button class="danger" id="bleArmConfirm" disabled>Arm audit</button>
+    </div>
+  </div>
+</div>
+
 <main id="tabConsole" hidden>
   <section class="panel console" id="shellPanel">
     <div class="console-tools">
@@ -861,6 +1014,19 @@ let pingTimer = null;
 let pcapOn = false;
 const pcapFrames = [];        // { ts, olen, bytes:Uint8Array } collected for the .pcap
 
+/* ---------- BLE state ----------
+   Independent of the WiFi arm: the firmware has a separate ble_armed flag and
+   a separate ack string (PRIVACY_AUDIT), so you cannot arm an audit by muscle
+   memory from the WiFi arm dialog. */
+let bleCapable = false;       // set true when the hello advertises "ble" / "ble_audit"
+let bleScanOn  = false;        // local toggle; the device confirms via ble_scan ack
+let bleArmed   = false;        // local mirror of the device's ble_armed flag
+let bleTarget  = null;         // { mac, name, kind } selected from the table
+let bleAuditOn = false;        // audit running against bleTarget
+let bleDevices = [];           // last ble scan msg's top[]
+let bleAuditLast = null;       // last ble_audit stat line
+let bleArmLastFocus = null;
+
 /* ---------- capability / support ---------- */
 const supported = "serial" in navigator;
 $("support").textContent = supported
@@ -1010,14 +1176,153 @@ function renderWifi(msg) {
   });
 }
 
+/* ---------- BLE: rendering + arming + audit ----------
+   This mirrors the WiFi flow 1:1 so the UI stays legible: a scan table on the
+   left, target+arm on the right, audit panel below arm. The only genuinely new
+   element is the verdict pill, which maps the firmware's five verdict strings
+   onto coloured badges — the whole point of the audit is to make that verdict
+   obvious at a glance. */
+function bleKindBadge(k) {
+  const kind = (k || "random").toLowerCase();
+  const label = kind.toUpperCase();
+  return `<span class="ble-kind ${esc(kind)}" title="address classification from the BLE stack">${esc(label)}</span>`;
+}
+function bleVerdictBadge(v) {
+  const vv = (v || "unknown").toLowerCase();
+  return `<span class="ble-verdict ${esc(vv)}">${esc((v || "UNKNOWN").toUpperCase())}</span>`;
+}
+
+function setBleCapable(cap) {
+  bleCapable = !!cap;
+  $("tabBtnBle").hidden = !bleCapable;
+}
+
+function setBleScanBtn() {
+  $("bleScanLabel").textContent = bleScanOn ? "Stop scan" : "Start scan";
+  $("bleScanBtn").className = bleScanOn ? "" : "ghost";
+}
+
+function setBleArmed(a) {
+  if (bleArmed === a) return;
+  bleArmed = a;
+  $("bleArmBtnLabel").textContent = a ? "Disarm" : "Arm audit";
+  $("bleArmBtn").className = a ? "danger" : "danger-outline";
+  updateBleAuditBtn();
+  if (!a) {
+    // On disarm, device-side the audit stops too. Mirror locally.
+    bleAuditOn = false;
+    updateBleAuditBtn();
+    renderBleAudit(null);
+  }
+}
+
+function updateBleAuditBtn() {
+  const btn = $("bleAuditBtn");
+  btn.disabled = !bleArmed || !bleTarget;
+  $("bleAuditBtnLabel").textContent = bleAuditOn ? "Stop audit" : "Start audit";
+  btn.className = bleAuditOn ? "danger-outline" : "danger";
+}
+
+function setBleTarget(d) {
+  bleTarget = d ? { mac: d.mac, name: d.name || "", kind: d.kind || "random" } : null;
+  const box = $("bleTargetBox");
+  if (!bleTarget) {
+    box.innerHTML = '<div class="empty" style="padding:8px 0">No target selected.</div>';
+  } else {
+    box.innerHTML = `
+      <div class="kv"><span class="k">Name</span><span class="v">${esc(bleTarget.name || "(none)")}</span></div>
+      <div class="kv"><span class="k">MAC</span><span class="v ble-mac">${esc(bleTarget.mac)}</span></div>
+      <div class="kv"><span class="k">Kind</span><span class="v">${bleKindBadge(bleTarget.kind)}</span></div>
+    `;
+  }
+  updateBleAuditBtn();
+  // Rerender the device table so the target-flag row re-highlights.
+  renderBleTable();
+}
+
+function renderBleTable() {
+  const rows = (bleDevices || []).map(d => {
+    const sel = bleTarget && d.m === bleTarget.mac;
+    const nm = d.n || "<em style=\"color:var(--muted)\">(no name)</em>";
+    return `<tr tabindex="0" role="button" data-mac="${esc(d.m)}" data-name="${esc(d.n || "")}" data-kind="${esc(d.k || "")}" aria-selected="${sel ? "true" : "false"}">
+      <td>${nm} ${sel ? '<span class="tgt-flag">◈ target</span>' : ""}</td>
+      <td class="ble-mac">${esc(d.m)}</td>
+      <td class="num">${d.r} dBm</td>
+      <td>${bleKindBadge(d.k)}</td>
+      <td><div class="rssi-bar"><i style="width:${rssiPct(d.r)}%"></i></div></td>
+    </tr>`;
+  }).join("");
+  $("bleTableWrap").innerHTML = rows
+    ? `<table><thead><tr><th>Name</th><th>MAC</th><th>RSSI</th><th>Kind</th><th>Signal</th></tr></thead><tbody>${rows}</tbody></table>`
+    : (bleScanOn
+        ? `<div class="empty">Scanning… no advertisements seen yet.</div>`
+        : `<div class="empty">Start the BLE scan to list nearby devices.</div>`);
+  $("bleTableWrap").querySelectorAll("tbody tr").forEach(tr => {
+    const pick = () => setBleTarget({ mac: tr.dataset.mac, name: tr.dataset.name, kind: tr.dataset.kind });
+    tr.addEventListener("click", pick);
+    tr.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } });
+  });
+}
+
+function renderBle(msg) {
+  bleDevices = msg.top || [];
+  $("bleCount").textContent = msg.n ?? "—";
+  // Counts over the shown slice (top-6). The device-side table is 48 wide but
+  // the top-N slice is what the operator looks at — that's what we classify.
+  const rpa = bleDevices.filter(d => d.k === "rpa" || d.k === "nrpa").length;
+  const fixed = bleDevices.filter(d => d.k === "public" || d.k === "static").length;
+  $("bleRpaCount").textContent = rpa;
+  $("bleFixedCount").textContent = fixed;
+  renderBleTable();
+}
+
+function renderBleAudit(msg) {
+  bleAuditLast = msg;
+  const view = $("bleAuditView");
+  $("bleVerdictCard").innerHTML = msg ? bleVerdictBadge(msg.verdict) : "—";
+  if (!msg) {
+    view.innerHTML = '<div class="empty" style="padding:8px 0">Arm, pick a target, then start the audit.</div>';
+    return;
+  }
+  const since = msg.since || 0;
+  const mm = Math.floor(since / 60), ss = since % 60;
+  const elapsed = mm > 0 ? `${mm}m ${ss}s` : `${ss}s`;
+  view.innerHTML = `
+    <div class="kv" style="display:flex; justify-content:space-between; gap:8px"><span style="color:var(--muted)">Target</span><span class="ble-mac">${esc(msg.target || "")}</span></div>
+    <div class="kv" style="display:flex; justify-content:space-between; gap:8px; margin-top:6px"><span style="color:var(--muted)">Elapsed</span><span>${elapsed}</span></div>
+    <div class="kv" style="display:flex; justify-content:space-between; gap:8px; margin-top:6px"><span style="color:var(--muted)">Rotations seen</span><span>${msg.rotations}${msg.leak_hits ? ` <span style="color:#ff9f45">(${msg.leak_hits} leaky)</span>` : ""}</span></div>
+    <div class="kv" style="display:flex; justify-content:space-between; gap:8px; margin-top:6px; margin-bottom:8px"><span style="color:var(--muted)">Verdict</span><span>${bleVerdictBadge(msg.verdict)}</span></div>
+    <div class="ble-audit-detail">${esc(msg.detail || "")}</div>
+  `;
+}
+
+function openBleArm() {
+  bleArmLastFocus = document.activeElement;
+  $("bleArmAck").checked = false; $("bleArmConfirm").disabled = true;
+  $("bleArmScrim").hidden = false;
+  $("bleArmAck").focus();
+}
+function closeBleArm() { $("bleArmScrim").hidden = true; if (bleArmLastFocus) bleArmLastFocus.focus(); }
+
 /* ---------- message routing ---------- */
 function handleMessage(o) {
   if (typeof o.armed === "boolean" && o.armed !== armed) setArmed(o.armed);
   switch (o.t) {
     case "wifi": renderWifi(o); break;
+    case "ble": renderBle(o); break;
+    case "ble_audit":
+      // Device marks its own BLE arm state in each stat line (named "ble_armed"
+      // specifically — NOT "armed" — because the top-level `armed` handler
+      // treats that field as the WiFi arm state and lighting the WiFi banner
+      // from a BLE message would mislead the operator about deauth being live).
+      if (typeof o.ble_armed === "boolean" && o.ble_armed !== bleArmed) setBleArmed(o.ble_armed);
+      renderBleAudit(o);
+      break;
     case "pong": $("uptime").textContent = (o.up / 1000).toFixed(0) + "s"; break;
     case "hello":
       logLine(`${o.fw} v${o.ver} — cap=[${(o.cap || []).join(",")}]`, "hello");
+      // Enable the BLE tab only if the connected device actually has BLE.
+      setBleCapable((o.cap || []).includes("ble") || (o.cap || []).includes("ble_audit"));
       announce("Connected to " + o.fw + " " + o.ver); break;
     case "atk":
       logLine(`[${o.st}] ${o.m}`, "atk");
@@ -1038,6 +1343,22 @@ function handleMessage(o) {
     case "ack":
       logLine(`${o.c}: ${o.m}`, o.ok ? "ackok" : "ackno");
       if (o.c === "twin" && o.ok && /stopped/.test(o.m || "")) twinReset();
+      // BLE acks: drive local scan/arm/audit state only on an ok. A refused ack
+      // (bad PRIVACY_AUDIT phrase, no target, etc.) leaves the UI unchanged.
+      if (o.c === "ble_scan" && o.ok) {
+        bleScanOn = /^scanning/.test(o.m || ""); setBleScanBtn();
+        if (!bleScanOn) renderBleTable();   // clear "scanning…" placeholder
+      } else if (o.c === "ble_arm" && o.ok) {
+        setBleArmed(true);
+      } else if (o.c === "ble_disarm" && o.ok) {
+        setBleArmed(false);
+      } else if (o.c === "ble_audit") {
+        if (o.ok) {
+          bleAuditOn = /^auditing/.test(o.m || "");
+          if (!bleAuditOn) renderBleAudit(null);
+          updateBleAuditBtn();
+        }
+      }
       break;
     case "twin": handleTwin(o); break;
     case "sta": logLine(`station ${o.mac} ${o.r ? "(" + o.r + " dBm)" : ""}`, "sta"); break;
@@ -1051,6 +1372,8 @@ function handleMessage(o) {
         logLine(`survey done — ${n} AP(s) with clients (of ${o.aps} seen)`, "info");
         announce(`Survey done: ${n} access point(s) with clients`);
         if (lastWifi) renderWifi(lastWifi);
+      } else if (o.sta) {
+        logLine(`survey: station ${o.sta} on ${o.bssid} ch${o.ch}`, "sta");
       } else if (o.bssid) {
         surveyClients[o.bssid] = { ch: o.ch, clients: o.clients };
         logLine(`survey: ${o.bssid} ch${o.ch} → ${o.clients} client(s)`, "sta");
@@ -1192,7 +1515,7 @@ function addTraffic(o) {
 }
 function showTab(name) {
   activeTab = name;
-  for (const t of ["attack", "traffic", "console"]) {
+  for (const t of ["attack", "traffic", "ble", "console"]) {
     const cap = t[0].toUpperCase() + t.slice(1);
     $("tab" + cap).hidden = name !== t;
     $("tabBtn" + cap).classList.toggle("on", name === t);
@@ -1401,6 +1724,15 @@ async function disconnect() {
   $("shellInput").disabled = true; $("shellSend").disabled = true;
   shellReady = false;
   twinReset();
+  // Reset BLE UI to its disconnected state. We don't send a disarm — the port
+  // is already closed; the device will reboot or persist its state as it would.
+  bleScanOn = false; bleAuditOn = false; bleDevices = []; bleAuditLast = null;
+  setBleArmed(false);
+  setBleTarget(null);
+  setBleScanBtn();
+  renderBleAudit(null);
+  renderBleTable();
+  setBleCapable(false);
   refreshGates();
 }
 
@@ -1464,7 +1796,29 @@ $("trafStart").addEventListener("click", toggleTraffic);
 $("trafClear").addEventListener("click", clearTraffic);
 $("tabBtnAttack").addEventListener("click", () => showTab("attack"));
 $("tabBtnTraffic").addEventListener("click", () => showTab("traffic"));
+$("tabBtnBle").addEventListener("click", () => showTab("ble"));
 $("tabBtnConsole").addEventListener("click", () => showTab("console"));
+
+/* ---------- BLE event listeners ---------- */
+$("bleScanBtn").addEventListener("click", () => {
+  // Flip local state and tell the device. The real state follows the ack.
+  send({ t: "ble_scan", on: !bleScanOn });
+});
+$("bleArmBtn").addEventListener("click", () => {
+  if (bleArmed) { send({ t: "ble_disarm" }); } else { openBleArm(); }
+});
+$("bleArmAck").addEventListener("change", e => { $("bleArmConfirm").disabled = !e.target.checked; });
+$("bleArmCancel").addEventListener("click", closeBleArm);
+$("bleArmConfirm").addEventListener("click", () => {
+  send({ t: "ble_arm", ack: "PRIVACY_AUDIT" });
+  closeBleArm();
+});
+$("bleArmScrim").addEventListener("click", e => { if (e.target === $("bleArmScrim")) closeBleArm(); });
+$("bleAuditBtn").addEventListener("click", () => {
+  if (!bleTarget) return;
+  if (bleAuditOn) { send({ t: "ble_audit", on: false }); }
+  else            { send({ t: "ble_audit", mac: bleTarget.mac }); }
+});
 
 $("shellForm").addEventListener("submit", e => {
   e.preventDefault();
