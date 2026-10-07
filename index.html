@@ -136,6 +136,25 @@
     border-radius: 5px; font-family: var(--mono); white-space: nowrap;
     color: var(--accent-ink); border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line));
   }
+  /* channel-provenance flag on a scan row: observed channel != scan's guess */
+  .ch-fix { color: var(--warn); font-weight: 700; cursor: help; margin-left: 3px; }
+
+  /* ---- channel lock state (target box) ---- */
+  .ch-state { display: inline-flex; align-items: center; gap: 6px; }
+  .ch-num { font-weight: 700; }
+  .ch-src { font-size: 10px; padding: 1px 6px; border-radius: 5px; font-family: var(--mono);
+            color: var(--accent-ink); border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line)); }
+  .ch-state.unknown .ch-num { color: var(--warn); }
+  .ch-locating { display: inline-flex; align-items: center; gap: 6px; color: var(--warn); }
+  .ch-spin { width: 11px; height: 11px; border-radius: 50%; display: inline-block;
+             border: 2px solid color-mix(in srgb, var(--warn) 35%, transparent);
+             border-top-color: var(--warn); animation: chSpin .7s linear infinite; }
+  @keyframes chSpin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .ch-spin { animation: none; } }
+  button.chip-btn { font: inherit; font-size: 11px; font-weight: 600; padding: 2px 9px;
+    border-radius: 6px; color: var(--accent-ink); background: transparent;
+    border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line)); cursor: pointer; }
+  button.chip-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 
   /* ---- target panel ---- */
   .target-box { font-family: var(--mono); font-size: 13px; display: grid; gap: 5px; }
@@ -1005,9 +1024,9 @@ const $ = (id) => document.getElementById(id);
 })();
 let port = null, reader = null, keepReading = false, writerLock = false;
 let rxCount = 0, capCount = 0, armed = false, autoRunning = false;
-let target = null;            // { bssid, ssid, ch }
+let target = null;            // { bssid, ssid, ch, chSrc, locating, enc, wps }
 let clients = [];             // MACs seen associated with the current target
-let surveyClients = {};       // bssid -> { ch, clients } from the channel-hop survey
+let surveyClients = {};       // bssid -> { ch, clients, rssi } from the channel-hop survey
 let lastWifi = null;          // last wifi scan msg, so survey badges can re-render it
 let filter = "all", paused = false;
 let pingTimer = null;
@@ -1095,33 +1114,124 @@ function setArmed(a) {
 }
 function refreshGates() {
   const ready = armed && !!target;
+  const chanReady = ready && !!target.ch && !target.locating;   // radio is actually aimed
   $("advGrid").querySelectorAll("button").forEach(btn => {
-    // recon primitives (stations/survey) only need a connection; attacks need arm+target
-    const reconOnly = btn.dataset.cmd === "stations" || btn.dataset.cmd === "survey";
-    btn.disabled = !port || (reconOnly ? false : !ready);
+    const cmd = btn.dataset.cmd;
+    const reconOnly = cmd === "stations" || cmd === "survey";   // connection only
+    const passive   = cmd === "sniff";                          // targeted, no TX, no channel gate
+    const enabled = !port ? false
+      : reconOnly ? true
+      : passive   ? ready
+      :             chanReady;                                  // TX attacks need a locked channel
+    btn.disabled = !enabled;
   });
-  $("autoBtn").disabled = !ready && !autoRunning;
-  $("attackHint").style.display = ready ? "none" : "flex";
+  $("autoBtn").disabled = !ready && !autoRunning;               // auto surveys/locates on its own
+  const hint = $("attackHint"), hintSpan = hint.querySelector("span");
+  if (!ready) {
+    hint.style.display = "flex";
+    hintSpan.textContent = "Select a target and arm to enable active commands. Every command re-confirms the exact BSSID (Gate 2).";
+  } else if (!chanReady) {
+    hint.style.display = "flex";
+    hintSpan.textContent = target.locating
+      ? "Locating the target's channel… TX attacks unlock once the radio is aimed."
+      : "Channel unknown — use Find channel (or Survey) so TX attacks aim at the right channel.";
+  } else {
+    hint.style.display = "none";
+  }
   $("trafStart").disabled = !(port && target);   // recon: needs a target, no arming
   setTwinBtn(); twinRow();                        // twin: needs arm + target (gated)
 }
 
 /* ---------- target selection ---------- */
-function setTarget(t) {
-  target = t;
-  clients = [];
+const CH_SRC = { 1: "scan", 2: "beacon" };   // numeric src from the device's tgtstate
+
+/* The channel cell tells you, at a glance, whether we're actually aimed at the
+   target: a locked channel + where we learned it, a spinner while we hunt for
+   its beacon, or a "?" with a Find-channel button when it's unknown. */
+function chStateHTML() {
+  if (!target) return "—";
+  if (target.locating)
+    return `<span class="ch-locating"><span class="ch-spin"></span>locating…</span>`;
+  if (target.ch)
+    return `<span class="ch-state"><span class="ch-num">${target.ch}</span>` +
+           (target.chSrc ? `<span class="ch-src">${esc(target.chSrc)} ✓</span>` : "") + `</span>`;
+  return `<span class="ch-state unknown"><span class="ch-num">?</span>` +
+         `<button class="chip-btn" id="findChanBtn" type="button">Find channel</button></span>`;
+}
+
+function renderTargetBox() {
   const box = $("targetBox");
+  if (!target) { box.innerHTML = `<div class="empty" style="padding:8px 0">No target selected.</div>`; return; }
   box.innerHTML = `
-    <div class="kv"><span class="k">SSID</span><span class="v">${esc(t.ssid || "—")}</span></div>
-    <div class="kv"><span class="k">BSSID</span><span class="v">${esc(t.bssid)}</span></div>
-    <div class="kv"><span class="k">Channel</span><span class="v">${t.ch || "?"}</span></div>
-    <div class="kv"><span class="k">Clients</span><span class="v" id="clientCount">0</span></div>
+    <div class="kv"><span class="k">SSID</span><span class="v">${esc(target.ssid || "—")}</span></div>
+    <div class="kv"><span class="k">BSSID</span><span class="v">${esc(target.bssid)}</span></div>
+    <div class="kv"><span class="k">Channel</span><span class="v">${chStateHTML()}</span></div>
+    <div class="kv"><span class="k">Clients</span><span class="v" id="clientCount">${clients.length}</span></div>
     <div id="clientList" class="client-list"></div>`;
-  send({ t: "target", bssid: t.bssid, c: t.ch || 0 });
-  $("trafTarget").innerHTML = `Target: <b>${esc(t.ssid || t.bssid)}</b> · ch ${t.ch || "?"} — ${esc(t.enc || "")}`;
+  renderClients();
+  const fb = $("findChanBtn");
+  if (fb) fb.addEventListener("click", () => {
+    if (!target) return;
+    target.locating = true; renderTargetBox(); refreshGates();
+    send({ t: "locate" });
+    announce("Locating channel for " + (target.ssid || target.bssid));
+  });
+  const trafCh = target.locating ? "locating…" : (target.ch || "?");
+  $("trafTarget").innerHTML = `Target: <b>${esc(target.ssid || target.bssid)}</b> · ch ${trafCh} — ${esc(target.enc || "")}`;
+}
+
+function setTarget(t) {
+  // Prefer the channel the survey actually HEARD the beacon on over the scan's
+  // guess; fall back to the scan channel; 0 => the device locates it passively.
+  const sv = surveyClients[t.bssid];
+  const obsCh = sv && sv.ch >= 1 ? sv.ch : 0;
+  const scanCh = t.ch || 0;
+  const ch = obsCh || scanCh;
+  target = {
+    bssid: t.bssid, ssid: t.ssid || "", enc: t.enc || "",
+    ch, chSrc: obsCh ? "survey" : (scanCh ? "scan" : ""), locating: !ch, wps: false,
+  };
+  clients = [];
+  renderTargetBox();
+  send({ t: "target", bssid: t.bssid, c: ch });   // c:0 -> device hunts the channel
   refreshGates();
   markSelectedRow();
-  announce("Target set to " + (t.ssid || t.bssid));
+  announce("Target set to " + (target.ssid || target.bssid));
+}
+
+/* Device learned/corrected the target's channel (or SSID) — patch our view so
+   the display self-heals instead of showing a stale "?". */
+function handleTgtState(o) {
+  if (!target || !o.bssid) return;
+  if (o.bssid.toUpperCase() !== target.bssid.toUpperCase()) return;
+  if (o.ssid && !target.ssid) target.ssid = o.ssid;
+  if (typeof o.wps === "boolean") target.wps = o.wps;
+  if (o.ch >= 1) {
+    const corrected = target.ch && target.ch !== o.ch;
+    target.ch = o.ch;
+    target.chSrc = CH_SRC[o.src] || target.chSrc || "set";
+    target.locating = false;
+    if (corrected) logLine(`target channel corrected → ch ${o.ch} (${target.chSrc})`, "info");
+  }
+  renderTargetBox();
+  refreshGates();
+  markSelectedRow();
+  if (lastWifi) renderWifi(lastWifi);
+}
+
+function handleLocate(o) {
+  if (o.start) { if (target) { target.locating = true; renderTargetBox(); refreshGates(); }
+                 logLine("locate: hopping the band for the target's beacon…", "info"); return; }
+  if (o.done) {
+    if (o.found) {   // tgtstate follows with the channel; clear the spinner regardless
+      if (target) { target.locating = false; renderTargetBox(); refreshGates(); }
+      logLine("locate: target found — radio locked to its channel", "info");
+    } else {
+      if (target) { target.locating = false; renderTargetBox(); refreshGates(); }
+      logLine("locate: target never beaconed — out of range, off, or a different band", "err");
+      announce("Channel locate failed — target not heard");
+    }
+  }
 }
 
 /* Live clients associated with the current target — the deauth set. Seeing >0
@@ -1156,11 +1266,15 @@ function renderWifi(msg) {
   const rows = (msg.top || []).map(a => {
     const sel = target && a.b === target.bssid;
     const sv = surveyClients[a.b];
+    const obsCh = sv && sv.ch >= 1 ? sv.ch : 0;
+    const ch = obsCh || a.c;                        // trust the beacon we actually heard
+    const chFix = obsCh && a.c && obsCh !== a.c
+      ? ` <span class="ch-fix" title="scan reported ch ${a.c}; beacon heard on ch ${obsCh}">†</span>` : "";
     const cliBadge = sv && sv.clients > 0 ? `<span class="cli-badge">${sv.clients} client${sv.clients > 1 ? "s" : ""}</span>` : "";
     return `<tr tabindex="0" role="button" data-bssid="${esc(a.b)}" data-ssid="${esc(a.s)}" data-ch="${a.c}" data-enc="${esc(a.e || "")}" aria-selected="${sel ? "true" : "false"}">
       <td>${esc(a.s || "<hidden>")} ${sel ? '<span class="tgt-flag">◈ target</span>' : ""}${cliBadge}</td>
       <td class="num">${a.r} dBm</td>
-      <td class="num">${a.c}</td>
+      <td class="num">${ch}${chFix}</td>
       <td>${encTag(a.e)}</td>
       <td><div class="rssi-bar"><i style="width:${rssiPct(a.r)}%"></i></div></td>
     </tr>`; }).join("");
@@ -1309,6 +1423,8 @@ function handleMessage(o) {
   if (typeof o.armed === "boolean" && o.armed !== armed) setArmed(o.armed);
   switch (o.t) {
     case "wifi": renderWifi(o); break;
+    case "tgtstate": handleTgtState(o); break;
+    case "locate": handleLocate(o); break;
     case "ble": renderBle(o); break;
     case "ble_audit":
       // Device marks its own BLE arm state in each stat line (named "ble_armed"
@@ -1375,8 +1491,13 @@ function handleMessage(o) {
       } else if (o.sta) {
         logLine(`survey: station ${o.sta} on ${o.bssid} ch${o.ch}`, "sta");
       } else if (o.bssid) {
-        surveyClients[o.bssid] = { ch: o.ch, clients: o.clients };
-        logLine(`survey: ${o.bssid} ch${o.ch} → ${o.clients} client(s)`, "sta");
+        surveyClients[o.bssid] = { ch: o.ch, clients: o.clients, rssi: o.r };
+        // If this maps the current target, adopt the observed channel right away.
+        if (target && o.bssid.toUpperCase() === target.bssid.toUpperCase() && o.ch >= 1 && target.ch !== o.ch) {
+          target.ch = o.ch; target.chSrc = "survey"; target.locating = false;
+          renderTargetBox(); refreshGates(); markSelectedRow();
+        }
+        if (o.clients > 0) logLine(`survey: ${o.bssid} ch${o.ch} → ${o.clients} client(s)`, "sta");
         if (lastWifi) renderWifi(lastWifi);
       }
       break;
@@ -1579,6 +1700,8 @@ function parseShellCommand(raw) {
       const v = onoff(p[1]); return v === null ? { error: `usage: ${cmd} on|off` } : { obj: { t: cmd, on: v } }; }
     case "survey":
       return (p[1] && /^stop$/i.test(p[1])) ? { obj: { t: "survey", stop: true } } : { obj: { t: "survey" } };
+    case "locate":
+      return { obj: { t: "locate" } };
     case "target": { const mac = (p[1] || "").toUpperCase();
       if (!MAC_RE.test(mac)) return { error: "usage: target <BSSID> [channel]" };
       return { obj: { t: "target", bssid: mac, c: p[2] ? (parseInt(p[2], 10) || 0) : 0 } }; }
@@ -1599,9 +1722,10 @@ function parseShellCommand(raw) {
 function shellHelp() {
   [
     "commands (also accepts verbatim JSON like {\"t\":\"scan\"}):",
-    "  ping · scan · stations · survey [stop] · chan <1-14>",
+    "  ping · scan · stations · survey [stop] · locate · chan <1-14>",
     "  sniff|monitor|pcap|traffic on|off",
-    "  target <BSSID> [ch]        select the target (Gate 2)",
+    "  target <BSSID> [ch]        select the target (Gate 2; omit ch -> auto-locate)",
+    "  locate                     hop the band to find the target's real channel",
     "  arm AUTHORIZED / disarm    Gate 1 (bare `arm` is refused, like the device)",
     "  deauth [BSSID] [n] · handshake [BSSID] · pmkid [BSSID] · wps [BSSID]",
     "  auto [BSSID] · auto stop   run/stop the wifite-style chain",
