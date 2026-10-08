@@ -593,6 +593,10 @@
               <svg class="icon" viewBox="0 0 24 24"><path d="M5 12a7 7 0 0 1 14 0M8 12a4 4 0 0 1 8 0"/><circle cx="12" cy="12" r="1.4"/><path d="M4 4l16 16"/></svg>
               Deauth
             </button>
+            <button class="danger-outline" data-cmd="flood" disabled title="Floods the AP's auth/assoc table — stresses the AP itself, not the clients (best-effort)">
+              <svg class="icon" viewBox="0 0 24 24"><path d="M3 12h3l2-6 3 12 2-8 2 5 1-3h5"/></svg>
+              AP flood
+            </button>
             <button class="danger-outline" data-cmd="pmkid" disabled>
               <svg class="icon" viewBox="0 0 24 24"><circle cx="8" cy="12" r="4"/><path d="M12 12h8M17 12v4M20 12v3"/></svg>
               PMKID
@@ -1033,6 +1037,7 @@ let pingTimer = null;
 let pcapOn = false;
 let sniffOn = false;          // Sniff toggle (green when the device is sniffing)
 let deauthOn = false;         // sustained-deauth toggle (red when actively kicking)
+let floodOn = false;          // AP auth/assoc flood toggle (red); mutually exclusive w/ deauth
 const pcapFrames = [];        // { ts, olen, bytes:Uint8Array } collected for the .pcap
 
 /* An Attack-grid button by its data-cmd, and a green/red "on" visual for toggles. */
@@ -1042,9 +1047,10 @@ function setToggleBtn(cmd, on, kind) {   // kind: "accent" (green) | "danger" (r
   btn.className = on ? (kind === "danger" ? "danger" : "")
                      : (kind === "danger" ? "danger-outline" : "ghost");
   btn.setAttribute("aria-pressed", on ? "true" : "false");
-  btn.title = on ? (kind === "danger" ? "Sustained deauth running — click to stop"
-                                      : "Sniffing — click to stop")
-                 : "";
+  const titles = { sniff: "Sniffing — click to stop",
+                   deauth: "Sustained deauth running — click to stop",
+                   flood: "AP auth/assoc flood running — click to stop" };
+  btn.title = on ? (titles[cmd] || "running — click to stop") : "";
 }
 
 /* ---------- BLE state ----------
@@ -1123,9 +1129,10 @@ function setArmed(a) {
   $("armBtnLabel").textContent = a ? "Disarm" : "Arm";
   $("armBtn").className = a ? "danger" : "danger-outline";
   $("armBtn").style.flex = "1"; $("armBtn").style.justifyContent = "center";
-  if (!a) {              // disarm tears down twin + sustained deauth on-device — mirror it
+  if (!a) {              // disarm tears down twin + sustained deauth + flood on-device — mirror it
     twinReset();
     deauthOn = false; setToggleBtn("deauth", false, "danger");
+    floodOn = false;  setToggleBtn("flood", false, "danger");
   }
   refreshGates();
 }
@@ -1481,6 +1488,14 @@ function handleMessage(o) {
         else if (o.ok && /sustained/.test(o.m || "")) deauthOn = true;
         else if (!o.ok) deauthOn = false;          // refused -> not running
         setToggleBtn("deauth", deauthOn, "danger");
+        if (deauthOn) { floodOn = false; setToggleBtn("flood", false, "danger"); }
+      }
+      if (o.c === "flood") {
+        if (/stopped/.test(o.m || "")) floodOn = false;
+        else if (o.ok && /flood/.test(o.m || "")) floodOn = true;
+        else if (!o.ok) floodOn = false;           // refused -> not running
+        setToggleBtn("flood", floodOn, "danger");
+        if (floodOn) { deauthOn = false; setToggleBtn("deauth", false, "danger"); }
       }
       // BLE acks: drive local scan/arm/audit state only on an ok. A refused ack
       // (bad PRIVACY_AUDIT phrase, no target, etc.) leaves the UI unchanged.
@@ -1527,6 +1542,9 @@ function handleMessage(o) {
     case "eapol": logLine(`EAPOL on ${o.bssid} (${o.r} dBm)`, "eapol"); break;
     case "deauth":   // sustained-deauth 1 Hz feedback: frames/s + mapped client count
       if (o.kind === "stat") logLine(`deauth: ${o.sent} frame/s → ${o.clients} client(s)${o.probes ? ` + ${o.probes} probe-sta` : ""} on ch${o.ch}`, "sta");
+      break;
+    case "flood":    // AP auth/assoc flood 1 Hz feedback: frames/s
+      if (o.kind === "stat") logLine(`AP flood: ${o.sent} frame/s on ch${o.ch}`, "sta");
       break;
     case "stalist": logLine(`stations: ${o.n}`, "info"); break;
     case "pcap": collectPcap(o); break;   // high-volume: no per-frame console line
@@ -1731,7 +1749,7 @@ function parseShellCommand(raw) {
     case "target": { const mac = (p[1] || "").toUpperCase();
       if (!MAC_RE.test(mac)) return { error: "usage: target <BSSID> [channel]" };
       return { obj: { t: "target", bssid: mac, c: p[2] ? (parseInt(p[2], 10) || 0) : 0 } }; }
-    case "auto": case "deauth": case "handshake": case "pmkid": case "wps": {
+    case "auto": case "deauth": case "flood": case "handshake": case "pmkid": case "wps": {
       if (cmd === "auto" && /^stop$/i.test(p[1] || "")) return { obj: { t: "auto", stop: true } };
       let mac = (p[1] || "").toUpperCase(), rest = p.slice(2);
       if (!MAC_RE.test(mac)) {                       // no explicit BSSID -> use the selected target
@@ -1743,6 +1761,8 @@ function parseShellCommand(raw) {
         if (/^on$/i.test(rest[0] || ""))       obj.on = true;
         else if (/^off$/i.test(rest[0] || "")) obj.on = false;
         else { const n = parseInt(rest[0], 10); obj.n = (n >= 1 && n <= 64) ? n : 16; }
+      } else if (cmd === "flood") {                  // on|off toggle; bare `flood` = start
+        obj.on = !/^off$/i.test(rest[0] || "");
       }
       return { obj };
     }
@@ -1758,6 +1778,7 @@ function shellHelp() {
     "  locate                     hop the band to find the target's real channel",
     "  arm AUTHORIZED / disarm    Gate 1 (bare `arm` is refused, like the device)",
     "  deauth [BSSID] on|off     sustained kick toggle (perfect-interval)",
+    "  flood  [BSSID] on|off     AP auth/assoc stress flood (best-effort AP DoS)",
     "  deauth [BSSID] [n] · handshake [BSSID] · pmkid [BSSID] · wps [BSSID]",
     "  auto [BSSID] · auto stop   run/stop the wifite-style chain",
     "  (omitting BSSID uses the selected target) · help · clear",
@@ -1879,8 +1900,8 @@ async function disconnect() {
   $("shellInput").disabled = true; $("shellSend").disabled = true;
   shellReady = false;
   twinReset();
-  sniffOn = false; deauthOn = false;              // clear toggle visuals on disconnect
-  setToggleBtn("sniff", false, "accent"); setToggleBtn("deauth", false, "danger");
+  sniffOn = false; deauthOn = false; floodOn = false;   // clear toggle visuals on disconnect
+  setToggleBtn("sniff", false, "accent"); setToggleBtn("deauth", false, "danger"); setToggleBtn("flood", false, "danger");
   // Reset BLE UI to its disconnected state. We don't send a disarm — the port
   // is already closed; the device will reboot or persist its state as it would.
   bleScanOn = false; bleAuditOn = false; bleDevices = []; bleAuditLast = null;
@@ -1902,7 +1923,14 @@ function fire(cmd) {
   if (cmd === "deauth") {                 // sustained toggle: start/stop the kick loop
     deauthOn = !deauthOn;
     setToggleBtn("deauth", deauthOn, "danger");   // optimistic; the device ack confirms
+    if (deauthOn) { floodOn = false; setToggleBtn("flood", false, "danger"); }  // exclusive
     return send({ t: "deauth", bssid, on: deauthOn });
+  }
+  if (cmd === "flood") {                   // AP auth/assoc stress flood toggle
+    floodOn = !floodOn;
+    setToggleBtn("flood", floodOn, "danger");
+    if (floodOn) { deauthOn = false; setToggleBtn("deauth", false, "danger"); }  // exclusive
+    return send({ t: "flood", bssid, on: floodOn });
   }
   if (cmd === "sniff") {                   // sniff toggle: green while the radio sniffs
     sniffOn = !sniffOn;
