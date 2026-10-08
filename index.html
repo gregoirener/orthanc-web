@@ -621,7 +621,7 @@
           <div class="field" style="margin-top:12px">
             <label for="burstN">Deauth burst</label>
             <input type="number" id="burstN" min="1" max="64" value="16" inputmode="numeric">
-            <span class="note">frames (1–64)</span>
+            <span class="note">one-shot frames (1–64) for <code>deauth &lt;bssid&gt; N</code> in the console. The Deauth button is a sustained toggle — kicks every 100&nbsp;ms until you click it off.</span>
           </div>
           <p class="hint" id="attackHint">
             <svg class="icon" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
@@ -1031,7 +1031,21 @@ let lastWifi = null;          // last wifi scan msg, so survey badges can re-ren
 let filter = "all", paused = false;
 let pingTimer = null;
 let pcapOn = false;
+let sniffOn = false;          // Sniff toggle (green when the device is sniffing)
+let deauthOn = false;         // sustained-deauth toggle (red when actively kicking)
 const pcapFrames = [];        // { ts, olen, bytes:Uint8Array } collected for the .pcap
+
+/* An Attack-grid button by its data-cmd, and a green/red "on" visual for toggles. */
+function advBtn(cmd) { return $("advGrid").querySelector(`button[data-cmd="${cmd}"]`); }
+function setToggleBtn(cmd, on, kind) {   // kind: "accent" (green) | "danger" (red)
+  const btn = advBtn(cmd); if (!btn) return;
+  btn.className = on ? (kind === "danger" ? "danger" : "")
+                     : (kind === "danger" ? "danger-outline" : "ghost");
+  btn.setAttribute("aria-pressed", on ? "true" : "false");
+  btn.title = on ? (kind === "danger" ? "Sustained deauth running — click to stop"
+                                      : "Sniffing — click to stop")
+                 : "";
+}
 
 /* ---------- BLE state ----------
    Independent of the WiFi arm: the firmware has a separate ble_armed flag and
@@ -1109,7 +1123,10 @@ function setArmed(a) {
   $("armBtnLabel").textContent = a ? "Disarm" : "Arm";
   $("armBtn").className = a ? "danger" : "danger-outline";
   $("armBtn").style.flex = "1"; $("armBtn").style.justifyContent = "center";
-  if (!a) twinReset();   // disarm tears down the twin on-device — mirror it here
+  if (!a) {              // disarm tears down twin + sustained deauth on-device — mirror it
+    twinReset();
+    deauthOn = false; setToggleBtn("deauth", false, "danger");
+  }
   refreshGates();
 }
 function refreshGates() {
@@ -1117,13 +1134,10 @@ function refreshGates() {
   const chanReady = ready && !!target.ch && !target.locating;   // radio is actually aimed
   $("advGrid").querySelectorAll("button").forEach(btn => {
     const cmd = btn.dataset.cmd;
-    const reconOnly = cmd === "stations" || cmd === "survey";   // connection only
-    const passive   = cmd === "sniff";                          // targeted, no TX, no channel gate
-    const enabled = !port ? false
-      : reconOnly ? true
-      : passive   ? ready
-      :             chanReady;                                  // TX attacks need a locked channel
-    btn.disabled = !enabled;
+    // Passive recon (sniff/stations/survey) only needs a connection — you sniff to
+    // map clients BEFORE arming. TX attacks need arm + target + a locked channel.
+    const reconOnly = cmd === "stations" || cmd === "survey" || cmd === "sniff";
+    btn.disabled = !port ? true : (reconOnly ? false : !chanReady);
   });
   $("autoBtn").disabled = !ready && !autoRunning;               // auto surveys/locates on its own
   const hint = $("attackHint"), hintSpan = hint.querySelector("span");
@@ -1459,6 +1473,15 @@ function handleMessage(o) {
     case "ack":
       logLine(`${o.c}: ${o.m}`, o.ok ? "ackok" : "ackno");
       if (o.c === "twin" && o.ok && /stopped/.test(o.m || "")) twinReset();
+      // Sync the Sniff / Deauth toggles to the device's own word (handles a
+      // refusal, or state changed from the serial shell).
+      if (o.c === "sniff") { sniffOn = o.ok && /\bon\b/.test(o.m || ""); setToggleBtn("sniff", sniffOn, "accent"); }
+      if (o.c === "deauth") {
+        if (/stopped/.test(o.m || "")) deauthOn = false;
+        else if (o.ok && /sustained/.test(o.m || "")) deauthOn = true;
+        else if (!o.ok) deauthOn = false;          // refused -> not running
+        setToggleBtn("deauth", deauthOn, "danger");
+      }
       // BLE acks: drive local scan/arm/audit state only on an ok. A refused ack
       // (bad PRIVACY_AUDIT phrase, no target, etc.) leaves the UI unchanged.
       if (o.c === "ble_scan" && o.ok) {
@@ -1502,6 +1525,9 @@ function handleMessage(o) {
       }
       break;
     case "eapol": logLine(`EAPOL on ${o.bssid} (${o.r} dBm)`, "eapol"); break;
+    case "deauth":   // sustained-deauth 1 Hz feedback: frames/s + mapped client count
+      if (o.kind === "stat") logLine(`deauth: ${o.sent} frame/s → ${o.clients} client(s) on ch${o.ch}`, "sta");
+      break;
     case "stalist": logLine(`stations: ${o.n}`, "info"); break;
     case "pcap": collectPcap(o); break;   // high-volume: no per-frame console line
     case "traffic": addTraffic(o); break;
@@ -1713,7 +1739,11 @@ function parseShellCommand(raw) {
         mac = target.bssid; rest = p.slice(1);
       }
       const obj = { t: cmd, bssid: mac };
-      if (cmd === "deauth") { const n = parseInt(rest[0], 10); obj.n = (n >= 1 && n <= 64) ? n : 16; }
+      if (cmd === "deauth") {                        // on|off = sustained toggle; N = one-shot burst
+        if (/^on$/i.test(rest[0] || ""))       obj.on = true;
+        else if (/^off$/i.test(rest[0] || "")) obj.on = false;
+        else { const n = parseInt(rest[0], 10); obj.n = (n >= 1 && n <= 64) ? n : 16; }
+      }
       return { obj };
     }
     default: return { error: `unknown command "${cmd}" — type help` };
@@ -1727,6 +1757,7 @@ function shellHelp() {
     "  target <BSSID> [ch]        select the target (Gate 2; omit ch -> auto-locate)",
     "  locate                     hop the band to find the target's real channel",
     "  arm AUTHORIZED / disarm    Gate 1 (bare `arm` is refused, like the device)",
+    "  deauth [BSSID] on|off     sustained kick toggle (perfect-interval)",
     "  deauth [BSSID] [n] · handshake [BSSID] · pmkid [BSSID] · wps [BSSID]",
     "  auto [BSSID] · auto stop   run/stop the wifite-style chain",
     "  (omitting BSSID uses the selected target) · help · clear",
@@ -1848,6 +1879,8 @@ async function disconnect() {
   $("shellInput").disabled = true; $("shellSend").disabled = true;
   shellReady = false;
   twinReset();
+  sniffOn = false; deauthOn = false;              // clear toggle visuals on disconnect
+  setToggleBtn("sniff", false, "accent"); setToggleBtn("deauth", false, "danger");
   // Reset BLE UI to its disconnected state. We don't send a disarm — the port
   // is already closed; the device will reboot or persist its state as it would.
   bleScanOn = false; bleAuditOn = false; bleDevices = []; bleAuditLast = null;
@@ -1866,11 +1899,16 @@ function fire(cmd) {
   if (cmd === "survey") return send({ t: "survey" });
   if (!target) { announce("No target selected"); return; }
   const bssid = target.bssid;
-  if (cmd === "deauth") {
-    let n = parseInt($("burstN").value, 10); if (isNaN(n)) n = 16; n = Math.max(1, Math.min(64, n));
-    return send({ t: "deauth", bssid, n });
+  if (cmd === "deauth") {                 // sustained toggle: start/stop the kick loop
+    deauthOn = !deauthOn;
+    setToggleBtn("deauth", deauthOn, "danger");   // optimistic; the device ack confirms
+    return send({ t: "deauth", bssid, on: deauthOn });
   }
-  if (cmd === "sniff") return send({ t: "sniff", on: true, bssid });
+  if (cmd === "sniff") {                   // sniff toggle: green while the radio sniffs
+    sniffOn = !sniffOn;
+    setToggleBtn("sniff", sniffOn, "accent");
+    return send({ t: "sniff", on: sniffOn, bssid });
+  }
   return send({ t: cmd, bssid });   // pmkid / handshake / wps
 }
 
