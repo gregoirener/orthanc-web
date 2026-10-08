@@ -1187,6 +1187,9 @@ function renderTargetBox() {
     <div class="kv"><span class="k">SSID</span><span class="v">${esc(target.ssid || "—")}</span></div>
     <div class="kv"><span class="k">BSSID</span><span class="v">${esc(target.bssid)}</span></div>
     <div class="kv"><span class="k">Channel</span><span class="v">${chStateHTML()}</span></div>
+    ${target.pmf >= 1 ? `<div class="kv"><span class="k">PMF</span><span class="v">${
+      target.pmf === 2 ? '<span class="ch-fix" title="802.11w required — deauth/disassoc are cryptographically protected; no deauth tool can disconnect clients">required ⚠ deauth blocked</span>'
+                       : 'optional'}</span></div>` : ""}
     <div class="kv"><span class="k">Clients</span><span class="v" id="clientCount">${clients.length}</span></div>
     <div id="clientList" class="client-list"></div>`;
   renderClients();
@@ -1227,6 +1230,10 @@ function handleTgtState(o) {
   if (o.bssid.toUpperCase() !== target.bssid.toUpperCase()) return;
   if (o.ssid && !target.ssid) target.ssid = o.ssid;
   if (typeof o.wps === "boolean") target.wps = o.wps;
+  if (typeof o.pmf === "number") {
+    if (o.pmf === 2 && target.pmf !== 2) logLine("target REQUIRES PMF (802.11w) — deauth/disassoc are protected and will NOT disconnect its clients (any tool)", "err");
+    target.pmf = o.pmf;
+  }
   if (o.ch >= 1) {
     const corrected = target.ch && target.ch !== o.ch;
     target.ch = o.ch;
