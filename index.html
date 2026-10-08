@@ -1526,7 +1526,7 @@ function handleMessage(o) {
       break;
     case "eapol": logLine(`EAPOL on ${o.bssid} (${o.r} dBm)`, "eapol"); break;
     case "deauth":   // sustained-deauth 1 Hz feedback: frames/s + mapped client count
-      if (o.kind === "stat") logLine(`deauth: ${o.sent} frame/s → ${o.clients} client(s) on ch${o.ch}`, "sta");
+      if (o.kind === "stat") logLine(`deauth: ${o.sent} frame/s → ${o.clients} client(s)${o.probes ? ` + ${o.probes} probe-sta` : ""} on ch${o.ch}`, "sta");
       break;
     case "stalist": logLine(`stations: ${o.n}`, "info"); break;
     case "pcap": collectPcap(o); break;   // high-volume: no per-frame console line
